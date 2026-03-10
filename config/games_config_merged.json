@@ -70955,12 +70955,5 @@
     "John Carpenter's Toxic Commando": {
         "client_id": "1442714232331436062",
         "executable_path": "bin/pc/John Carpenter's Toxic Commando.exe"
-    },
-    "Resident Evil Requiem": {
-        "name": "Resident Evil Requiem",
-        "steam_appid": "3764200",
-        "image": "steam",
-        "client_id": "1456485028350656512",
-        "executable_path": "RESIDENT EVIL requiem BIOHAZARD requiem/re9.exe"
     }
 }

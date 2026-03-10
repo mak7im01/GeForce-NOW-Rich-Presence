@@ -66,8 +66,15 @@ class SystemTrayIcon(QSystemTrayIcon):
         self.setContextMenu(self.menu)
         
         # Connect signals
+        try:
+            self.pm.request_match_selection.disconnect()
+            self.pm.gfn_error_detected.disconnect()
+            self.pm.download_progress.disconnect()
+        except:
+            pass
         self.pm.request_match_selection.connect(self.on_match_selection_requested)
         self.pm.gfn_error_detected.connect(self.on_gfn_error_detected)
+        self.pm.download_progress.connect(self.on_download_progress)
         self.activated.connect(self.on_activated)
         self.menu.aboutToShow.connect(self.update_menu)
 
@@ -211,19 +218,34 @@ class SystemTrayIcon(QSystemTrayIcon):
         """
         # Reuse search logic
         gm = self.pm.games_map or {}
-        candidates = [k for k in gm if game_name.lower() in k.lower()]
+        local_candidates = [k for k in gm if game_name.lower() in k.lower()]
         
         options = []
-        if candidates:
-            for k in candidates:
-                options.append({"name": k, "id": gm[k].get("client_id"), "exe": gm[k].get("executable_path"), "score": 1.0})
-        else:
-            options = self.pm._find_discord_matches(game_name, max_candidates=5)
-            if not options:
-                self.showMessage("Buscando...", f"No encontrado en caché. Descargando datos recientes para '{game_name}'...", QSystemTrayIcon.Information, 4000)
-                QApplication.processEvents() 
-                self.pm._fetch_discord_apps_cached(force_download=True)
-                options = self.pm._find_discord_matches(game_name, max_candidates=5)
+        if local_candidates:
+            for k in local_candidates:
+                score = 1.0 if k.lower() == game_name.lower() else 0.8
+                options.append({"name": k, "id": gm[k].get("client_id"), "exe": gm[k].get("executable_path"), "score": score})
+        
+        discord_options = self.pm._find_discord_matches(game_name, max_candidates=50)
+        for d_opt in discord_options:
+            if not any(o["name"].lower() == d_opt["name"].lower() for o in options):
+                options.append(d_opt)
+
+        options.sort(key=lambda x: x.get("score", 0), reverse=True)
+        options = options[:50]
+
+        if not options:
+            self.showMessage("Buscando...", f"No encontrado en caché. Descargando datos recientes para '{game_name}'...", QSystemTrayIcon.Information, 4000)
+            QApplication.processEvents() 
+            self.pm._fetch_discord_apps_cached(force_download=True)
+            
+            discord_options2 = self.pm._find_discord_matches(game_name, max_candidates=50)
+            for d_opt in discord_options2:
+                if not any(o["name"].lower() == d_opt["name"].lower() for o in options):
+                    options.append(d_opt)
+            
+            options.sort(key=lambda x: x.get("score", 0), reverse=True)
+            options = options[:50]
         
         if not options:
             self.showMessage("Info", "Sin coincidencias encontradas.", QSystemTrayIcon.Information, 3000)
@@ -249,28 +271,41 @@ class SystemTrayIcon(QSystemTrayIcon):
 
     def process_force_game(self, game_name):
         gm = self.pm.games_map or {}
-        candidates = [k for k in gm if game_name.lower() in k.lower()]
+        local_candidates = [k for k in gm if game_name.lower() in k.lower()]
         
         options = []
-        if candidates:
-            for k in candidates:
-                options.append({"name": k, "id": gm[k].get("client_id"), "exe": gm[k].get("executable_path"), "score": 1.0})
-        else:
-            # 1. Search in Discord (Local Cache First)
-            options = self.pm._find_discord_matches(game_name, max_candidates=5)
+        if local_candidates:
+            for k in local_candidates:
+                score = 1.0 if k.lower() == game_name.lower() else 0.8
+                options.append({"name": k, "id": gm[k].get("client_id"), "exe": gm[k].get("executable_path"), "score": score})
+        
+        # 1. Search in Discord (Local Cache First)
+        discord_options = self.pm._find_discord_matches(game_name, max_candidates=50)
+        for d_opt in discord_options:
+            if not any(o["name"].lower() == d_opt["name"].lower() for o in options):
+                options.append(d_opt)
 
-            # 2. If no matches, force download and search again
-            if not options:
-                self.showMessage("Buscando...", f"No encontrado en caché. Descargando datos recientes de Discord para '{game_name}'...", QSystemTrayIcon.Information, 4000)
-                QApplication.processEvents() # Keep UI responsive (mostly)
-                
-                # Update cache
-                self.pm._fetch_discord_apps_cached(force_download=True)
-                
-                # Search again
-                options = self.pm._find_discord_matches(game_name, max_candidates=5)
+        options.sort(key=lambda x: x.get("score", 0), reverse=True)
+        options = options[:50]
 
-            # Note: We don't apply automatically here loop; we show selection dialog
+        # 2. If no matches, force download and search again
+        if not options:
+            self.showMessage("Buscando...", f"No encontrado en caché. Descargando datos recientes de Discord para '{game_name}'...", QSystemTrayIcon.Information, 4000)
+            QApplication.processEvents() # Keep UI responsive (mostly)
+            
+            # Update cache
+            self.pm._fetch_discord_apps_cached(force_download=True)
+            
+            # Search again
+            discord_options2 = self.pm._find_discord_matches(game_name, max_candidates=50)
+            for d_opt in discord_options2:
+                if not any(o["name"].lower() == d_opt["name"].lower() for o in options):
+                    options.append(d_opt)
+            
+            options.sort(key=lambda x: x.get("score", 0), reverse=True)
+            options = options[:50]
+
+        # Note: We don't apply automatically here loop; we show selection dialog
 
         if not options:
             self.showMessage("Info", "Sin coincidencias en JSON ni Discord (incluso tras actualizar).", QSystemTrayIcon.Information, 3000)
@@ -369,6 +404,40 @@ class SystemTrayIcon(QSystemTrayIcon):
             self.pm.on_match_selected(game_key, dialog.selected_match)
         else:
             self.pm.on_match_selected(game_key, None)
+
+    def on_download_progress(self, current, total):
+        if current == -1 and total == -1:
+            if getattr(self, '_download_progress_dlg', None):
+                self._download_progress_dlg.close()
+                self._download_progress_dlg = None
+            return
+
+        if not getattr(self, '_download_progress_dlg', None):
+            self._download_progress_dlg = QProgressDialog("Descargando lista de juegos...", "Cancelar", 0, total if total > 0 else 0, None)
+            self._download_progress_dlg.setStyleSheet(GAMING_STYLESHEET)
+            self._download_progress_dlg.setWindowModality(Qt.WindowModal)
+            self._download_progress_dlg.setMinimumDuration(0)
+            self._download_progress_dlg.setAutoReset(False)
+            self._download_progress_dlg.setAutoClose(False)
+            self._download_progress_dlg.show()
+            
+        if getattr(self, '_download_progress_dlg', None):
+            if total > 0:
+                self._download_progress_dlg.setMaximum(total)
+            self._download_progress_dlg.setValue(current)
+            
+            def fmt(sz):
+                if sz < 1024 * 1024:
+                    return f"{sz / 1024:.1f} KB"
+                return f"{sz / 1024 / 1024:.2f} MB"
+                
+            msg = f"Descargando lista de juegos... ({fmt(current)} / {fmt(total)})" if total > 0 else f"Descargando lista de juegos... ({fmt(current)})"
+            self._download_progress_dlg.setLabelText(msg)
+            QApplication.processEvents()
+            
+            if self._download_progress_dlg.wasCanceled():
+                self._download_progress_dlg.close()
+                self._download_progress_dlg = None
 
     def sync_games(self):
         status = self.pm.check_discord_cache_status()

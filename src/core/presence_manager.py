@@ -13,6 +13,7 @@ import re
 import sys
 from pathlib import Path
 import os
+import json
 from typing import Optional, Dict, List
 import threading
 from src.core.app_launcher import AppLauncher
@@ -44,6 +45,7 @@ class PresenceManager(QObject):
     log_message = pyqtSignal(str, str) # level, message
     request_match_selection = pyqtSignal(str, list) # game_key, candidates
     sync_progress = pyqtSignal(int, int, int, str) # current, total, updated, eta_str
+    download_progress = pyqtSignal(int, int) # current_bytes, total_bytes
     sync_finished = pyqtSignal(int, int) # updated_count, total_processed
     sync_error = pyqtSignal(str)
     gfn_error_detected = pyqtSignal()
@@ -727,9 +729,24 @@ class PresenceManager(QObject):
 
             sess = self._get_http_session()
             logger.info("⬇️ Descargando lista de aplicaciones detectables de Discord...")
-            resp = sess.get(DISCORD_DETECTABLE_URL, timeout=15)
+            resp = sess.get(DISCORD_DETECTABLE_URL, stream=True, timeout=15)
             if resp.status_code == 200:
-                apps = resp.json()
+                total_size = int(resp.headers.get('content-length', 0))
+                downloaded = 0
+                chunks = []
+                self.download_progress.emit(0, total_size)
+                
+                for chunk in resp.iter_content(chunk_size=65536):
+                    if chunk:
+                        chunks.append(chunk)
+                        downloaded += len(chunk)
+                        self.download_progress.emit(downloaded, total_size)
+                
+                self.download_progress.emit(-1, -1) # Signal completion
+                
+                raw_data = b"".join(chunks)
+                apps = json.loads(raw_data)
+                
                 if apps:
                     to_save = {"_ts": int(time.time()), "apps": apps}
                     try:
@@ -743,8 +760,10 @@ class PresenceManager(QObject):
                     logger.warning("⚠️ La respuesta de Discord no contiene aplicaciones.")
             else:
                 logger.warning(f"⚠️ Error descargando de Discord: Status {resp.status_code}")
+                self.download_progress.emit(-1, -1)
         except Exception as e:
             logger.debug(f"Error obteniendo detectable de Discord: {e}")
+            self.download_progress.emit(-1, -1)
         return []
 
 
@@ -827,14 +846,19 @@ class PresenceManager(QObject):
 
 
                 score_name = fuzz.ratio(gnl, n_name) / 100.0
+                if gnl in n_name:
+                    score_name = max(score_name, 0.7 + 0.3 * (len(gnl) / len(n_name)))
+                
                 score_alias = 0.0
                 if n_aliases:
                     best_alias_score = 0
                     for alias in n_aliases:
-                        s = fuzz.ratio(gnl, alias)
+                        s = fuzz.ratio(gnl, alias) / 100.0
+                        if gnl in alias:
+                            s = max(s, 0.7 + 0.3 * (len(gnl) / len(alias)))
                         if s > best_alias_score:
                             best_alias_score = s
-                    score_alias = best_alias_score / 100.0
+                    score_alias = best_alias_score
 
                 score = max(score_name, score_alias)
                 if score > 0.35:
@@ -860,9 +884,14 @@ class PresenceManager(QObject):
 
 
                 score_name = _difflib.SequenceMatcher(None, gnl, n_name).ratio()
+                if gnl in n_name:
+                    score_name = max(score_name, 0.7 + 0.3 * (len(gnl) / len(n_name)))
+                    
                 score_alias = 0.0
                 for a in n_aliases:
                     s = _difflib.SequenceMatcher(None, gnl, a).ratio()
+                    if gnl in a:
+                        s = max(s, 0.7 + 0.3 * (len(gnl) / len(a)))
                     if s > score_alias:
                         score_alias = s
 
@@ -1494,15 +1523,14 @@ class PresenceManager(QObject):
             
         save_json(games_config, config_path)
         logger.info(f"✏️ Custom Presence updated for {game_key}: {data}")
-        
-        # Trigger update
-        # We need to ensure new data is merged into 'game' if 'game' is forced_game copy
+    
+        # Actualiza el juego forzado o el último juego
         if self.forced_game:
             self.forced_game.update(data)
         if self.last_game:
             self.last_game.update(data)
             
-        self.update_presence(game) # Pass game object explicitly effectively
+        self.update_presence(game) # Pasa el objeto
         return True
 
     def close(self):
@@ -1510,7 +1538,7 @@ class PresenceManager(QObject):
             try:
                 self.rpc.clear()
                 self.rpc.close()
-                time.sleep(0.1)  # Allow loop to close gracefully
+                time.sleep(0.1) 
                 self._connected_client_id = None
                 logger.debug("🧹close_fake_executable desde close")
                 self.close_fake_executable()
