@@ -120,6 +120,16 @@ GAMING_STYLESHEET = """
         height: 0; 
         background: none; 
     }
+
+    QPlainTextEdit {
+        background-color: #131416;
+        border: 1px solid #1f2428;
+        border-radius: 8px;
+        color: #cfcfcf;
+        font-family: Consolas, "Courier New", monospace;
+        font-size: 13px;
+        padding: 8px;
+    }
 """
 
 class GamingMessageBox(QDialog):
@@ -876,4 +886,290 @@ class GFNRepairDialog(QDialog):
         self.status_lbl.setStyleSheet("color: #00e676; font-weight: bold;")
         self.progress.setValue(100)
         self.ok_btn.setVisible(True)
+
+
+# ---- SYNTAX HIGHLIGHTER & LOG VIEWER ----
+from PyQt5.QtGui import QSyntaxHighlighter, QTextCharFormat, QColor, QFont, QTextCursor
+from PyQt5.QtCore import QRegExp
+from PyQt5.QtWidgets import QPlainTextEdit, QFileDialog
+from src.core.utils import LOG_FILE
+from src.version import VERSION
+
+class LogHighlighter(QSyntaxHighlighter):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.rules = []
+        
+        # Color definitions matching dark theme
+        info_format = QTextCharFormat()
+        info_format.setForeground(QColor("#00e676")) # bright green/cyan
+        info_format.setFontWeight(QFont.Bold)
+        
+        warn_format = QTextCharFormat()
+        warn_format.setForeground(QColor("#ffab00")) # orange/yellow
+        warn_format.setFontWeight(QFont.Bold)
+        
+        error_format = QTextCharFormat()
+        error_format.setForeground(QColor("#ff1744")) # red
+        error_format.setFontWeight(QFont.Bold)
+        
+        debug_format = QTextCharFormat()
+        debug_format.setForeground(QColor("#808080")) # gray
+        
+        # Rules: match [LEVEL] tags
+        self.rules.append((QRegExp(r"\[DEBUG\]"), debug_format))
+        self.rules.append((QRegExp(r"\[INFO\]"), info_format))
+        self.rules.append((QRegExp(r"\[WARNING\]"), warn_format))
+        self.rules.append((QRegExp(r"\[ERROR\]"), error_format))
+        self.rules.append((QRegExp(r"\[CRITICAL\]"), error_format))
+
+    def highlightBlock(self, text):
+        for pattern, format in self.rules:
+            expression = QRegExp(pattern)
+            index = expression.indexIn(text)
+            while index >= 0:
+                length = expression.matchedLength()
+                self.setFormat(index, length, format)
+                index = expression.indexIn(text, index + length)
+
+
+class GamingLogViewerDialog(QDialog):
+    def __init__(self, texts=None, parent=None):
+        super().__init__(parent)
+        self.texts = texts if texts is not None else TEXTS
+        self.setWindowTitle(self.texts.get("log_viewer_title", "Visor de Registros (Logs)"))
+        self.setWindowIcon(QIcon(str(ASSETS_DIR / "geforce.ico")))
+        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
+        self.setStyleSheet(GAMING_STYLESHEET)
+        self.setMinimumSize(750, 500)
+        
+        layout = QVBoxLayout()
+        layout.setContentsMargins(20, 20, 20, 15)
+        layout.setSpacing(12)
+        
+        # Header
+        title = QLabel(self.texts.get("log_viewer_title", "Visor de Registros (Logs)"))
+        title.setObjectName("title_label")
+        title.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title)
+        
+        desc = QLabel(self.texts.get("log_viewer_desc", "Historial de eventos de la aplicación. Si experimentas problemas, puedes exportar este archivo y enviarlo."))
+        desc.setWordWrap(True)
+        desc.setAlignment(Qt.AlignCenter)
+        desc.setStyleSheet("font-size: 13px; color: #cfcfcf; padding-bottom: 5px;")
+        layout.addWidget(desc)
+        
+        # Log Text Box
+        self.log_text_edit = QPlainTextEdit()
+        self.log_text_edit.setReadOnly(True)
+        
+        # Set up Syntax Highlighter
+        self.highlighter = LogHighlighter(self.log_text_edit.document())
+        
+        layout.addWidget(self.log_text_edit)
+        
+        # Buttons Layout
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(12)
+        
+        self.refresh_btn = QPushButton(self.texts.get("refresh", "Refresh"))
+        self.refresh_btn.clicked.connect(self.load_logs)
+        
+        self.export_btn = QPushButton(self.texts.get("export", "Export Logs"))
+        self.export_btn.setObjectName("secondary")
+        self.export_btn.clicked.connect(self.on_export)
+        
+        self.close_btn = QPushButton(self.texts.get("close", "Close"))
+        self.close_btn.setObjectName("secondary")
+        self.close_btn.clicked.connect(self.accept)
+        
+        btn_layout.addWidget(self.refresh_btn)
+        btn_layout.addWidget(self.export_btn)
+        btn_layout.addStretch()
+        btn_layout.addWidget(self.close_btn)
+        layout.addLayout(btn_layout)
+        
+        self.setLayout(layout)
+        
+        # Initial load
+        self.load_logs()
+
+    def load_logs(self):
+        log_content = ""
+        try:
+            if LOG_FILE.exists():
+                # Read log file safely (ignoring encoding errors, avoiding locks)
+                log_content = LOG_FILE.read_text(encoding="utf-8", errors="ignore")
+            else:
+                log_content = "No log file found."
+        except Exception as e:
+            log_content = f"Error reading log file: {e}"
+            
+        self.log_text_edit.setPlainText(log_content)
+        
+        # Auto scroll to bottom
+        self.log_text_edit.moveCursor(QTextCursor.End)
+
+    def on_export(self):
+        default_name = "geforce_presence_logs.txt"
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            self.texts.get("export", "Export Logs"),
+            default_name,
+            "Log Files (*.log *.txt);;All Files (*)"
+        )
+        
+        if file_path:
+            try:
+                log_content = ""
+                if LOG_FILE.exists():
+                    log_content = LOG_FILE.read_text(encoding="utf-8", errors="ignore")
+                
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(log_content)
+                
+                GamingMessageBox.show_info(
+                    self,
+                    "Success",
+                    self.texts.get("logs_exported", "Logs successfully exported to {path}").replace("{path}", file_path)
+                )
+            except Exception as e:
+                GamingMessageBox.show_warning(
+                    self,
+                    "Error",
+                    self.texts.get("export_error", "Error exporting logs: {error}").replace("{error}", str(e))
+                )
+
+
+class CrashReporterDialog(QDialog):
+    def __init__(self, traceback_text, texts=None, parent=None):
+        super().__init__(parent)
+        self.texts = texts if texts is not None else TEXTS
+        self.setWindowTitle(self.texts.get("crash_title", "⚠️ Unexpected Error"))
+        self.setWindowIcon(QIcon(str(ASSETS_DIR / "geforce.ico")))
+        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
+        self.setStyleSheet(GAMING_STYLESHEET)
+        self.setMinimumSize(600, 450)
+        
+        layout = QVBoxLayout()
+        layout.setContentsMargins(25, 25, 25, 20)
+        layout.setSpacing(15)
+        
+        # Title Header
+        title = QLabel(self.texts.get("crash_title", "⚠️ Unexpected Error"))
+        title.setObjectName("title_label")
+        title.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title)
+        
+        # Message description
+        desc = QLabel(self.texts.get("crash_msg", "The application has suffered an unhandled critical error. Details have been saved to logs. You can copy the error below to report it."))
+        desc.setWordWrap(True)
+        desc.setAlignment(Qt.AlignCenter)
+        desc.setStyleSheet("font-size: 14px; color: #cfcfcf; padding-bottom: 8px;")
+        layout.addWidget(desc)
+        
+        # Tech details heading
+        tech_title = QLabel("System Details & Traceback:")
+        tech_title.setStyleSheet("font-weight: bold; color: #ffffff;")
+        layout.addWidget(tech_title)
+        
+        # Gather technical details
+        import platform
+        import sys
+        from PyQt5.QtCore import QT_VERSION_STR
+        import datetime
+        
+        tech_details = (
+            f"App Version: {VERSION}\n"
+            f"Python Version: {platform.python_version()}\n"
+            f"OS: {platform.system()} {platform.release()} ({platform.architecture()[0]})\n"
+            f"Qt Version: {QT_VERSION_STR}\n"
+            f"Timestamp: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"--------------------------------------------------\n"
+        )
+        
+        self.full_error_text = tech_details + traceback_text
+        
+        self.text_edit = QPlainTextEdit()
+        self.text_edit.setPlainText(self.full_error_text)
+        self.text_edit.setReadOnly(True)
+        layout.addWidget(self.text_edit)
+        
+        # Buttons Layout
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(12)
+        
+        self.copy_btn = QPushButton(self.texts.get("copy_error", "Copy Error"))
+        self.copy_btn.clicked.connect(self.on_copy)
+        
+        self.export_btn = QPushButton(self.texts.get("export", "Export Logs"))
+        self.export_btn.setObjectName("secondary")
+        self.export_btn.clicked.connect(self.on_export)
+        
+        self.close_btn = QPushButton(self.texts.get("close", "Close"))
+        self.close_btn.setObjectName("secondary")
+        self.close_btn.clicked.connect(self.accept)
+        
+        btn_layout.addWidget(self.copy_btn)
+        btn_layout.addWidget(self.export_btn)
+        btn_layout.addStretch()
+        btn_layout.addWidget(self.close_btn)
+        layout.addLayout(btn_layout)
+        
+        self.setLayout(layout)
+
+    def on_copy(self):
+        from PyQt5.QtWidgets import QApplication
+        QApplication.clipboard().setText(self.full_error_text)
+        
+        # Show a visual feedback
+        copied_text = self.texts.get("error_copied", "Copied!")
+        self.copy_btn.setText(f"✓ {copied_text}")
+        self.copy_btn.setEnabled(False)
+        
+        from PyQt5.QtCore import QTimer
+        # Reset button text after 2 seconds
+        QTimer.singleShot(2000, lambda: [
+            self.copy_btn.setText(self.texts.get("copy_error", "Copy Error")),
+            self.copy_btn.setEnabled(True)
+        ])
+
+    def on_export(self):
+        default_name = "geforce_presence_crash_logs.txt"
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            self.texts.get("export", "Export Logs"),
+            default_name,
+            "Log Files (*.log *.txt);;All Files (*)"
+        )
+        
+        if file_path:
+            try:
+                log_content = ""
+                if LOG_FILE.exists():
+                    log_content = LOG_FILE.read_text(encoding="utf-8", errors="ignore")
+                
+                # Prepend the crash details to the exported log
+                full_export_content = (
+                    "=== CRASH DETAILS ===\n" + 
+                    self.full_error_text + 
+                    "\n======================\n\n" + 
+                    log_content
+                )
+                
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(full_export_content)
+                
+                GamingMessageBox.show_info(
+                    self,
+                    "Success",
+                    self.texts.get("logs_exported", "Logs successfully exported to {path}").replace("{path}", file_path)
+                )
+            except Exception as e:
+                GamingMessageBox.show_warning(
+                    self,
+                    "Error",
+                    self.texts.get("export_error", "Error exporting logs: {error}").replace("{error}", str(e))
+                )
+
 

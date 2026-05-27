@@ -44,6 +44,103 @@ logger.debug(f"Base directory: {BASE_DIR}")
 logger.debug(f"Config directory: {CONFIG_DIR}")
 logger.debug(f"Logs directory: {LOGS_DIR}")
 
+import traceback
+import threading
+from PyQt5.QtCore import QObject, pyqtSignal
+
+class ExceptionSignaler(QObject):
+    exception_caught = pyqtSignal(str)
+
+exception_signaler = None
+main_presence_manager = None
+
+def show_crash_dialog_slot(tb_text):
+    try:
+        from src.ui.dialogs import CrashReporterDialog
+        from src.core.utils import get_lang_from_registry, load_locale
+        try:
+            lang = get_lang_from_registry()
+            texts = load_locale(lang)
+        except Exception:
+            texts = {}
+        
+        dlg = CrashReporterDialog(tb_text, texts)
+        dlg.exec_()
+    except Exception as e:
+        logger.error(f"Error displaying crash reporter dialog: {e}")
+        traceback.print_exc()
+    finally:
+        logger.info("Performing clean shutdown after unhandled crash...")
+        
+        # Cleanup presence_manager if initialized
+        global main_presence_manager
+        if main_presence_manager:
+            try:
+                main_presence_manager.stop_monitoring()
+                main_presence_manager.close()
+            except Exception as e:
+                logger.error(f"Error stopping presence manager during shutdown: {e}")
+                
+        # Release single instance lock
+        try:
+            from src.core.utils import release_lock
+            release_lock()
+        except Exception:
+            pass
+            
+        try:
+            QApplication.quit()
+        except Exception:
+            pass
+            
+        os._exit(1)
+
+def global_exception_handler(exc_type, exc_value, exc_traceback):
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        return
+
+    # Log with CRITICAL level and details
+    logger.critical("Uncaught main thread exception:", exc_info=(exc_type, exc_value, exc_traceback))
+    
+    try:
+        tb_lines = traceback.format_exception(exc_type, exc_value, exc_traceback)
+        tb_text = "".join(tb_lines)
+        
+        global exception_signaler
+        if exception_signaler is not None:
+            # If signaler is active, emit to main thread thread-safely
+            exception_signaler.exception_caught.emit(tb_text)
+        else:
+            # Fallback if exception occurs before signaler is initialized
+            print("Early crash (no UI exception signaler):", tb_text, file=sys.stderr)
+            os._exit(1)
+    except Exception:
+        traceback.print_exc()
+        os._exit(1)
+
+def global_thread_exception_handler(args):
+    # Log with CRITICAL level
+    logger.critical("Uncaught background thread exception:", exc_info=(args.exc_type, args.exc_value, args.exc_traceback))
+    
+    try:
+        tb_lines = traceback.format_exception(args.exc_type, args.exc_value, args.exc_traceback)
+        tb_text = "".join(tb_lines)
+        
+        global exception_signaler
+        if exception_signaler is not None:
+            exception_signaler.exception_caught.emit(tb_text)
+        else:
+            print("Early thread crash (no UI exception signaler):", tb_text, file=sys.stderr)
+            os._exit(1)
+    except Exception:
+        traceback.print_exc()
+        os._exit(1)
+
+sys.excepthook = global_exception_handler
+threading.excepthook = global_thread_exception_handler
+
+
 def main():
     import argparse
     import time
@@ -80,6 +177,10 @@ def main():
     # 4. Initialize PyQt Application
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False) # Important for tray apps
+
+    global exception_signaler
+    exception_signaler = ExceptionSignaler()
+    exception_signaler.exception_caught.connect(show_crash_dialog_slot)
 
     # 5. Check for Updates
     updater = Updater()
@@ -126,6 +227,9 @@ def main():
         texts=texts,
         update_interval=update_interval
     )
+
+    global main_presence_manager
+    main_presence_manager = presence_manager
 
     # 6.1 Optional Cookie Fetch
     if config_manager.get_setting("get_cookie_on_launch", True):

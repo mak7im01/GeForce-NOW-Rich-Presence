@@ -274,7 +274,14 @@ class SystemTrayIcon(QSystemTrayIcon):
 
     def apply_quest_game(self, match):
         name = match["name"]
-        exe = match.get("exe") or f"{name}.exe" # Fallback
+        
+        # Resolve exe: Discord match -> Local database config -> Generic fallback
+        exe = match.get("exe")
+        if not exe:
+            local_entry = (self.pm.games_map or {}).get(name) or {}
+            exe = local_entry.get("executable_path")
+        if not exe:
+            exe = f"{name}.exe"
         
         # Save cache
         self.pm._apply_discord_match(name, match)
@@ -336,7 +343,14 @@ class SystemTrayIcon(QSystemTrayIcon):
     def apply_force_game(self, match):
         name = match["name"]
         cid = match.get("id")
+        
+        # Resolve exe: Discord match -> Local database config -> Generic fallback
         exe = match.get("exe")
+        if not exe:
+            local_entry = (self.pm.games_map or {}).get(name) or {}
+            exe = local_entry.get("executable_path")
+        if not exe:
+            exe = f"{name}.exe"
         
         # PERSISTENCE: Save the match to games_config_merged.json
         # This ensures next time we have it in games_map and don't need to search/download
@@ -386,14 +400,24 @@ class SystemTrayIcon(QSystemTrayIcon):
             self.showMessage(TEXTS.get("cookie_title", "Cookie"), TEXTS.get("cookie_invalid", "Cookie invalid"), QSystemTrayIcon.Warning, 3000)
 
     def open_geforce(self):
-        AppLauncher.launch_geforce_now()
+        if not AppLauncher.launch_geforce_now():
+            title = TEXTS.get("gfn_corrupted_title", "GeForce NOW Error")
+            msg = TEXTS.get("gfn_install_question", "GeForce NOW is not installed or not found in the default path.\n\nDo you want to download and install GeForce NOW automatically now?")
+            if GamingMessageBox.show_question(None, title, msg):
+                self.on_gfn_error_detected()
 
     def open_logs(self):
-        import os
-        if LOG_FILE.exists():
-            os.startfile(LOG_FILE)
-        else:
-            self.showMessage(TEXTS.get("logs_title", "Logs"), TEXTS.get("open_logs_error", "No log file found."), QSystemTrayIcon.Warning, 3000)
+        from src.ui.dialogs import GamingLogViewerDialog
+        try:
+            dlg = GamingLogViewerDialog(texts=TEXTS, parent=None)
+            dlg.exec_()
+        except Exception as e:
+            logger.error(f"Error opening custom log viewer: {e}")
+            import os
+            if LOG_FILE.exists():
+                os.startfile(LOG_FILE)
+            else:
+                self.showMessage(TEXTS.get("logs_title", "Logs"), TEXTS.get("open_logs_error", "No log file found."), QSystemTrayIcon.Warning, 3000)
 
     def open_about(self):
         dlg = AboutDialog()

@@ -164,17 +164,25 @@ class UpdateWorker(QThread):
             logger.info(f"📦 Version actual: {VERSION}, Última versión GitHub: {latest_version_str}")
 
             if latest_version > current_version:
-                # Find .exe asset
-                exe_url = None
+                # Buscar asset .zip primero para actualización silenciosa, sino caer en el instalador .exe
+                update_url = None
                 for asset in data.get("assets", []):
-                    if asset["name"].endswith(".exe"):
-                        exe_url = asset["browser_download_url"]
+                    if asset["name"].lower().endswith(".zip"):
+                        update_url = asset["browser_download_url"]
+                        logger.info("Encontrado asset de actualización silenciosa (.zip).")
                         break
                 
-                if exe_url:
-                    self.check_finished.emit(True, latest_version_str, exe_url, data.get("body", ""))
+                if not update_url:
+                    for asset in data.get("assets", []):
+                        if asset["name"].lower().endswith(".exe"):
+                            update_url = asset["browser_download_url"]
+                            logger.info("Encontrado instalador de actualización tradicional (.exe).")
+                            break
+                
+                if update_url:
+                    self.check_finished.emit(True, latest_version_str, update_url, data.get("body", ""))
                 else:
-                    logger.warning("Nueva versión encontrada pero no se encontró el archivo .exe.")
+                    logger.warning("Nueva versión encontrada pero no se encontró un archivo .zip o .exe válido.")
                     self.check_finished.emit(False, "", "", "")
             else:
                 self.check_finished.emit(False, "", "", "")
@@ -194,7 +202,9 @@ class UpdateWorker(QThread):
             
             tmp_dir = Path(tempfile.gettempdir()) / "geforce_update"
             tmp_dir.mkdir(parents=True, exist_ok=True)
-            installer_path = tmp_dir / "installer.exe"
+            
+            ext = ".zip" if self.download_url.lower().endswith(".zip") else ".exe"
+            installer_path = tmp_dir / f"update{ext}"
 
             with open(installer_path, "wb") as f:
                 for chunk in response.iter_content(chunk_size=8192):
@@ -280,9 +290,44 @@ class UpdateDialog(QDialog):
     def install_update(self, installer_path):
         try:
             logger.info(f"Launching installer: {installer_path}")
-            # Launch installer and exit
-            subprocess.Popen([installer_path], shell=True)
-            sys.exit(0)
+            
+            if installer_path.lower().endswith(".zip"):
+                if getattr(sys, "frozen", False):
+                    pid = os.getpid()
+                    zip_path = str(installer_path)
+                    install_dir = str(Path(sys.executable).parent)
+                    exe_path = str(sys.executable)
+                    
+                    # Comando de PowerShell en una línea:
+                    # 1. Duerme 1s
+                    # 2. Espera a que el proceso actual finalice y libere los archivos
+                    # 3. Extrae el zip directamente sobre la ruta de instalación (sobreescribiendo con -Force)
+                    # 4. Elimina el zip temporal
+                    # 5. Inicia el nuevo ejecutable actualizado
+                    powershell_cmd = (
+                        f"Start-Sleep -Seconds 1; "
+                        f"while (Get-Process -Id {pid} -ErrorAction SilentlyContinue) {{ Start-Sleep -Milliseconds 100 }}; "
+                        f"Expand-Archive -Path '{zip_path}' -DestinationPath '{install_dir}' -Force; "
+                        f"Remove-Item -Path '{zip_path}' -Force; "
+                        f"Start-Process -FilePath '{exe_path}'"
+                    )
+                    
+                    logger.info(f"Ejecutando auto-actualizador silencioso en segundo plano: {powershell_cmd}")
+                    
+                    subprocess.Popen(
+                        ["powershell", "-Command", powershell_cmd],
+                        creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+                    )
+                    sys.exit(0)
+                else:
+                    msg = f"Modo de desarrollo: Actualización descargada en {installer_path}.\nLa auto-actualización silenciosa solo funciona en la versión compilada (.exe)."
+                    logger.info(msg)
+                    QMessageBox.information(self, "Desarrollo", msg)
+                    self.accept()
+            else:
+                # Launch installer wizard (.exe) and exit
+                subprocess.Popen([installer_path], shell=True)
+                sys.exit(0)
         except Exception as e:
             self.on_error(f"Failed to launch installer: {e}")
 

@@ -100,5 +100,16 @@
     "config_start_windows": "Iniciar con Windows",
     "config_start_gfn": "Iniciar GeForce NOW con la aplicación",
     "config_start_discord": "Iniciar Discord con la aplicación",
-    "config_get_cookie": "Obtener cookie al iniciar la aplicación"
+    "config_get_cookie": "Obtener cookie al iniciar la aplicación",
+    "log_viewer_title": "Visor de Registros (Logs)",
+    "log_viewer_desc": "Historial de eventos de la aplicación. Si experimentas problemas, puedes exportar este archivo y enviarlo.",
+    "export": "Exportar Logs",
+    "refresh": "Actualizar",
+    "copy_error": "Copiar Error",
+    "logs_exported": "Logs exportados exitosamente a {path}",
+    "export_error": "Error al exportar los logs: {error}",
+    "crash_title": "⚠️ Error Inesperado",
+    "crash_msg": "La aplicación ha sufrido un error crítico no controlado. Los detalles se han guardado en los logs. Puedes copiar el error abajo para reportarlo.",
+    "error_copied": "¡Detalles del error copiados al portapapeles!",
+    "gfn_install_question": "GeForce NOW no está instalado o no se encuentra en la ruta por defecto.\n\n¿Deseas descargar e instalar GeForce NOW de forma automática ahora?"
 }

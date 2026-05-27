@@ -100,5 +100,16 @@
     "config_start_windows": "Start with Windows",
     "config_start_gfn": "Start GeForce NOW on launch",
     "config_start_discord": "Start Discord on launch",
-    "config_get_cookie": "Get cookie on launch"
+    "config_get_cookie": "Get cookie on launch",
+    "log_viewer_title": "Application Log Viewer",
+    "log_viewer_desc": "Application event history. If you experience issues, you can export this file to send it.",
+    "export": "Export Logs",
+    "refresh": "Refresh",
+    "copy_error": "Copy Error",
+    "logs_exported": "Logs successfully exported to {path}",
+    "export_error": "Error exporting logs: {error}",
+    "crash_title": "⚠️ Unexpected Error",
+    "crash_msg": "The application has suffered an unhandled critical error. Details have been saved to logs. You can copy the error below to report it.",
+    "error_copied": "Error details copied to clipboard!",
+    "gfn_install_question": "GeForce NOW is not installed or not found in the default path.\n\nDo you want to download and install GeForce NOW automatically now?"
 }

@@ -77,6 +77,7 @@ class PresenceManager(QObject):
         self.last_log_message = None
         self.rpc = None
         self._connected_client_id = None
+        self._is_connecting = False
         
         self.active_quests = {} # {game_id: {proc: Popen, start_time: ts, name: str, finished: bool}}
         
@@ -337,26 +338,56 @@ class PresenceManager(QObject):
         self.close()
 
     def _connect_rpc(self, client_id: Optional[str] = None):
-        if client_id !="1095416975028650046":
-            try:
-                if self.rpc:
-                    try:
-                        self.rpc.close()
-                    except Exception:
-                        pass
-                client_id = client_id or self.client_id
-                self.rpc = Presence(client_id)
-                self.rpc.connect()
-                self._connected_client_id = client_id
-                logger.info(f"✅ Conectado a Discord RPC con client_id={client_id}")
-            except Exception as e:
-                if e == "Could not find Discord installed and running on this machine.":
-                    logger.error(f"💨 Relanzando Discord...")
-                    AppLauncher.launch_discord()
-                else:
-                    logger.error(f"❌ Error conectando a Discord RPC: {e}")
-                self.rpc = None
-                self._connected_client_id = None
+        if client_id != "1095416975028650046":
+            if self._is_connecting:
+                logger.debug("Ya hay un intento de conexión en progreso a Discord RPC, saltando intento concurrente.")
+                return
+            
+            self._is_connecting = True
+            
+            def perform_connect():
+                nonlocal client_id
+                try:
+                    if self.rpc:
+                        try:
+                            self.rpc.close()
+                        except Exception:
+                            pass
+                    client_id = client_id or self.client_id
+                    self.rpc = Presence(client_id)
+                    
+                    # Intentar conectar cada 2 segundos por un máximo de 10 segundos (5 intentos)
+                    max_retries = 5
+                    retry_delay = 2.0
+                    
+                    for attempt in range(max_retries):
+                        try:
+                            self.rpc.connect()
+                            self._connected_client_id = client_id
+                            logger.info(f"✅ Conectado a Discord RPC con client_id={client_id}")
+                            return
+                        except Exception as e:
+                            err_str = str(e)
+                            is_discord_not_running = "Could not find Discord" in err_str or "Discord installed and running" in err_str
+                            
+                            if is_discord_not_running and attempt < max_retries - 1:
+                                logger.info(f"⏳ Discord no parece estar listo aún. Reintentando conexión en {retry_delay}s... (Intento {attempt+1}/{max_retries})")
+                                time.sleep(retry_delay)
+                            else:
+                                raise e
+                except Exception as e:
+                    err_str = str(e)
+                    if "Could not find Discord" in err_str or "Discord installed and running" in err_str:
+                        logger.error(f"💨 No se pudo conectar a Discord RPC tras varios intentos. Relanzando Discord...")
+                        AppLauncher.launch_discord()
+                    else:
+                        logger.error(f"❌ Error conectando a Discord RPC: {e}")
+                    self.rpc = None
+                    self._connected_client_id = None
+                finally:
+                    self._is_connecting = False
+
+            threading.Thread(target=perform_connect, daemon=True).start()
 
     def stop_force_game(self):
         """Detiene el forzado de juego y vuelve a la detección automática"""
@@ -1491,7 +1522,7 @@ class PresenceManager(QObject):
             presence_data["party_size"] = party_size_data
 
         try:
-            if self.rpc:
+            if self.rpc and not getattr(self, "_is_connecting", False) and getattr(self, "_connected_client_id", None) == client_id:
                 self.rpc.update(**{k: v for k, v in presence_data.items() if v})
         except Exception as e:
             msg = str(e).lower()

@@ -26,5 +26,3 @@ El/los autor(es) y colaboradores de este software NO serán responsables de ning
 Este software accede a datos de autenticación altamente sensibles (por ejemplo, cookies de Steam) almacenados en tu dispositivo para automatizar la sincronización de la biblioteca. Aunque el software está diseñado para utilizar estos datos localmente y comunicarse únicamente con las APIs oficiales de las plataformas, el/los autor(es) no pueden garantizar una seguridad absoluta. Eres el único responsable de la seguridad de tu dispositivo. El/los autor(es) rechazan expresamente cualquier responsabilidad por accesos no autorizados, robo de tokens o robo de cuentas derivados del uso de este software o de malware presente en tu sistema.
 
 Al descargar, compilar o ejecutar este software, reconoces explícitamente que has leído, entendido y aceptado quedar sujeto a estos términos, además de la Licencia MIT estándar.
-
-Si quieres, puedo ajustarlo para que suene más formal/legal estilo jurídico español (más técnico) o dejarlo en este tono claro y directo que es más común en proyectos open-source.
