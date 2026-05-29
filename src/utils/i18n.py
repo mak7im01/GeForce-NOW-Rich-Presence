@@ -1,8 +1,12 @@
 import json
 import os
 import sys
-import winreg
 from pathlib import Path
+
+try:
+    import winreg
+except ImportError:
+    winreg = None
 
 def resource_path(relative_path):
     """Get absolute path to resource, works for dev and for PyInstaller"""
@@ -17,6 +21,8 @@ def resource_path(relative_path):
 LANG_DIR = Path(resource_path("lang"))
 
 def get_lang_from_registry(default="en"):
+    if not winreg:
+        return default
     try:
         key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\GeForcePresence")
         lang, _ = winreg.QueryValueEx(key, "lang")

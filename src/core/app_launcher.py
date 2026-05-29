@@ -4,6 +4,7 @@ import subprocess
 import logging
 import json
 import time
+import sys
 from pathlib import Path
 from typing import Optional
 from src.core.utils import get_lang_from_registry, load_locale
@@ -20,13 +21,17 @@ logger = logging.getLogger('geforce_presence')
 class AppLauncher:
     @staticmethod
     def find_geforce_now() -> Optional[str]:
-        possible = [
-            Path(os.getenv("LOCALAPPDATA", "")) / "NVIDIA Corporation" / "GeForceNOW" / "CEF" / "GeForceNOW.exe"
-        ]
-        for p in possible:
+        if sys.platform == "win32":
+            possible = [
+                Path(os.getenv("LOCALAPPDATA", "")) / "NVIDIA Corporation" / "GeForceNOW" / "CEF" / "GeForceNOW.exe"
+            ]
+            for p in possible:
+                if p.exists():
+                    return str(p)
+        elif sys.platform == "darwin":
+            p = Path("/Applications/GeForceNOW.app")
             if p.exists():
                 return str(p)
-            
         return None
 
     @staticmethod
@@ -56,6 +61,9 @@ class AppLauncher:
         Deshabilita el Rich Presence nativo de GeForce NOW en el archivo sharedstorage.json.
         Retorna (success, modified)
         """
+        if sys.platform != "win32":
+            return False, False
+
         config_path = Path(os.environ.get("LOCALAPPDATA", "")) / "NVIDIA Corporation" / "GeForceNOW" / "sharedstorage.json"
         
         if not config_path.exists():
@@ -110,10 +118,13 @@ class AppLauncher:
     def launch_geforce_now() -> bool:
         success, modified = AppLauncher.disable_native_rich_presence()
         
-        is_running = AppLauncher._is_process_running_by_name("GeForceNOW.exe")
+        target_proc = "GeForceNOW.exe" if sys.platform == "win32" else "GeForceNOW"
+        is_running = AppLauncher._is_process_running_by_name(target_proc)
+        if sys.platform == "darwin" and not is_running:
+            is_running = AppLauncher._is_process_running_by_name("GeForce NOW")
         
         if is_running:
-            if modified:
+            if modified and sys.platform == "win32":
                 logger.info("Reiniciando GeForce NOW para aplicar la desactivación del Rich Presence nativo...")
                 AppLauncher.kill_process_by_name("GeForceNOW.exe")
                 time.sleep(1.5)  # Esperar a que se cierre completamente
@@ -124,7 +135,10 @@ class AppLauncher:
         path = AppLauncher.find_geforce_now()
         if path:
             logger.info(TEXTS.get("launching", "🚀 Launching GeForce NOW..."))
-            subprocess.Popen([path])
+            if sys.platform == "darwin":
+                subprocess.Popen(["open", "-a", path])
+            else:
+                subprocess.Popen([path])
             return True
         else:
             logger.error(TEXTS.get("geforce_not_found", "GeForce NOW not found in the default installation path."))
@@ -132,9 +146,14 @@ class AppLauncher:
 
     @staticmethod
     def find_discord() -> Optional[str]:
-        p = Path(os.getenv("LOCALAPPDATA", "")) / "Discord" / "Update.exe"
-        if p.exists():
-            return str(p)
+        if sys.platform == "win32":
+            p = Path(os.getenv("LOCALAPPDATA", "")) / "Discord" / "Update.exe"
+            if p.exists():
+                return str(p)
+        elif sys.platform == "darwin":
+            p = Path("/Applications/Discord.app")
+            if p.exists():
+                return str(p)
         return None
 
     @staticmethod
@@ -147,6 +166,9 @@ class AppLauncher:
         updater = AppLauncher.find_discord()
         if updater:
             logger.info(TEXTS.get("launching_discord", "🚀 Iniciando Discord..."))
-            subprocess.Popen([updater, "--processStart", "Discord.exe"])
+            if sys.platform == "darwin":
+                subprocess.Popen(["open", "-a", updater])
+            else:
+                subprocess.Popen([updater, "--processStart", "Discord.exe"])
         else:
             logger.warning("⚠️ No se encontró Discord instalado en la ruta por defecto.")

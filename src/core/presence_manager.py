@@ -1193,25 +1193,53 @@ class PresenceManager(QObject):
                     break
             
             elif IS_MACOS:
-                # Use AppleScript to get the window title of GeForce NOW
-                # We assume the process name is "GeForceNOW" or similar.
-                # The AppleScript gets the window 1 of process "GeForceNOW"
+                # Use AppleScript to get the window title of GeForce NOW.
+                # We do a wildcard search matching all GeForce processes (like GeForceNOW, GeForce NOW, GeForceNOWStreamer, etc.)
+                # to be 100% robust and catch the active streaming window.
                 cmd = """
                 tell application "System Events"
-                    set procName to "GeForceNOW"
-                    if exists process procName then
+                    set geforceProcesses to every process whose name contains "GeForce"
+                    repeat with proc in geforceProcesses
                         try
-                            return name of window 1 of process procName
-                        on error
-                            return ""
+                            set windowNames to name of every window of proc
+                            if count of windowNames > 0 then
+                                set firstWindow to item 1 of windowNames
+                                if firstWindow is not "" then
+                                    return firstWindow
+                                end if
+                            end if
                         end try
-                    end if
-                    return ""
+                    end repeat
                 end tell
+                return ""
                 """
                 result = subprocess.run(["osascript", "-e", cmd], capture_output=True, text=True)
                 if result.returncode == 0:
                     title = result.stdout.strip()
+                
+                # FALLBACK FOR MACOS: If AppleScript failed to fetch the title (e.g. because of accessibility or screen recording permissions),
+                # we read the last game launched directly from the GeForce NOW logs if a GFN process is running!
+                if not title:
+                    is_gfn_running = False
+                    for proc in psutil.process_iter(attrs=['name']):
+                        proc_name = (proc.info.get('name') or "").lower()
+                        if "geforce" in proc_name:
+                            is_gfn_running = True
+                            break
+                    if is_gfn_running:
+                        log_path = Path(os.path.expanduser('~/Library/Application Support/NVIDIA/GeForceNOW/console.log'))
+                        if log_path.exists():
+                            try:
+                                log_content = log_path.read_text(encoding='utf-8', errors='ignore')
+                                drs_names = re.findall(r'\"DRSAppName\":\s*\"([^\"]+)\"', log_content)
+                                if drs_names:
+                                    title = drs_names[-1].strip()
+                                else:
+                                    launches = re.findall(r'Launch game ([^\\[\\n]+)', log_content)
+                                    if launches:
+                                        title = launches[-1].strip()
+                            except Exception as log_err:
+                                logger.debug(f"Error leyendo logs para fallback en macOS: {log_err}")
 
             elif IS_LINUX:
                 # Linux logic using xprop (assumes X11 for now)
@@ -1345,8 +1373,8 @@ class PresenceManager(QObject):
                     if name == "geforcenow.exe":
                         return True
                 elif IS_MACOS:
-                    # Verify exact process name on macOS
-                    if name == "geforcenow": # Likely "GeForceNOW"
+                    # Verify exact process name on macOS (can be GeForceNOW or GeForce NOW)
+                    if name in ("geforcenow", "geforce now"):
                         return True
         except Exception as e:
             logger.debug(f"Error comprobando procesos: {e}")
