@@ -531,15 +531,16 @@ class PresenceManager(QObject):
             
             # Prepare executable
             if IS_MACOS:
-                # Reuse MacOS logic from launch_fake_executable roughly
                  dumb_path = BASE_DIR / "tools" / "dumb.app"
+                 if not dumb_path.exists():
+                     logger.warning("⚠️ dumb.app no encontrado en tools/ (no compilado aún). Se omitirá la Quest en macOS.")
+                     return None
+                 
                  if exec_full_path.exists():
                      shutil.rmtree(exec_full_path)
                  
                  exec_full_path.parent.mkdir(parents=True, exist_ok=True)
-                 
-                 if dumb_path.exists():
-                     shutil.copytree(dumb_path, exec_full_path)
+                 shutil.copytree(dumb_path, exec_full_path)
             else:
                  dumb_path = BASE_DIR / "tools" / "dumb.exe"
                  if not dumb_path.exists():
@@ -703,7 +704,7 @@ class PresenceManager(QObject):
                 
                 dumb_path = BASE_DIR / "tools" / "dumb.app"
                 if not dumb_path.exists():
-                     logger.error(f"❌ dumb.app no encontrado en {dumb_path}")
+                     logger.warning("⚠️ dumb.app no encontrado en tools/ (no compilado aún). Se omitirá iniciar el ejecutable falso en macOS.")
                      return
  
                 # Copy .app bundle
