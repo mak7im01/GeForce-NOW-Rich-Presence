@@ -191,6 +191,7 @@ def main():
 
     if config_manager.get_setting("start_with_windows", False):
         try:
+            # pyrefly: ignore [missing-import]
             import winshell
             app_name = "GeForceNOWRichPresence"
             shortcut_path = os.path.join(winshell.startup(), f"{app_name}.lnk")
