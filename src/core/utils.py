@@ -278,10 +278,54 @@ def save_cookie_to_env(cookie_value: str, env_path: Path):
 
 def save_json(obj, path: Path):
     try:
-        with path.open("w", encoding="utf-8") as f:
+        temp_dir = path.parent
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        # Write to a temporary file in the same directory (same volume for atomic replace)
+        with tempfile.NamedTemporaryFile("w", dir=temp_dir, delete=False, encoding="utf-8", suffix=".tmp") as f:
             json.dump(obj, f, indent=4, ensure_ascii=False)
+            temp_path = Path(f.name)
+        
+        try:
+            temp_path.replace(path)
+        except Exception as replace_err:
+            if temp_path.exists():
+                temp_path.unlink()
+            raise replace_err
     except Exception as e:
         logger.error(f"Error guardando JSON {path}: {e}")
+
+def validate_discord_cache(data) -> bool:
+    """Validates that the discord cache structure is correct."""
+    if not isinstance(data, dict):
+        return False
+    if "apps" not in data or not isinstance(data["apps"], list):
+        return False
+    return len(data["apps"]) > 0
+
+def validate_games_config(data) -> bool:
+    """Validates that the games config structure is correct."""
+    if not isinstance(data, dict):
+        return False
+    for k, v in data.items():
+        if not isinstance(v, dict):
+            return False
+    return True
+
+def download_from_github(filename: str) -> Optional[dict]:
+    """Downloads a configuration/cache file from the master branch on GitHub."""
+    url = f"https://raw.githubusercontent.com/KarmaDevz/GeForce-NOW-Rich-Presence/master/config/{filename}"
+    try:
+        logger.info(f"⬇️ Descargando respaldo de {filename} desde GitHub...")
+        import requests
+        resp = requests.get(url, timeout=15)
+        if resp.status_code == 200:
+            data = resp.json()
+            return data
+        else:
+            logger.warning(f"⚠️ Error al descargar de GitHub: Código {resp.status_code}")
+    except Exception as e:
+        logger.error(f"❌ Error en la descarga de GitHub para {filename}: {e}")
+    return None
 
 def calculate_file_hash(path: Path, algorithm: str = "sha256") -> Optional[str]:
     try:

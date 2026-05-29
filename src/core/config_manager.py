@@ -27,10 +27,10 @@ class ConfigManager:
         }
         self.app_settings_path = CONFIG_DIR / "app_settings.json"
         self._load()
-
     def _load(self):
         # Ruta fija al archivo que siempre queremos cargar
         fixed_path = CONFIG_DIR / "games_config_merged.json"
+        backup_path = CONFIG_DIR / "games_config_merged_backup.json"
         
         # Cargar app_settings.json
         if self.app_settings_path.exists():
@@ -41,22 +41,52 @@ class ConfigManager:
         else:
             save_json(self.app_settings, self.app_settings_path)
 
-        # Si no existe, mostrar error en logs pero NO abrir Tkinter
-        if not fixed_path.exists():
-            logger.error(f"❌ No se encontró {fixed_path}. Se cargará un JSON vacío.")
-            self.games_config = {}
-            self.games_config_path = fixed_path
-            return
+        from src.core.utils import validate_games_config, download_from_github
+        data = None
 
-        # Cargar JSON fijo directamente sin pedir nada al usuario
-        data = safe_json_load(fixed_path)
-        if isinstance(data, dict):
+        # 1. Intentar cargar el archivo principal
+        if fixed_path.exists():
+            data = safe_json_load(fixed_path)
+            if not validate_games_config(data):
+                logger.warning("⚠️ games_config_merged.json está corrupto o es inválido.")
+                data = None
+
+        # 2. Intentar cargar copia de respaldo local (backup)
+        if data is None and backup_path.exists():
+            data = safe_json_load(backup_path)
+            if validate_games_config(data):
+                logger.info("ℹ️ Cargando copia de respaldo local (backup) de games_config_merged.json")
+                save_json(data, fixed_path)  # Restaurar el archivo principal
+            else:
+                logger.warning("⚠️ Copia de respaldo local games_config_merged_backup.json también está corrupta.")
+                data = None
+
+        # 3. Intentar descargar respaldo desde GitHub
+        if data is None:
+            data = download_from_github("games_config_merged.json")
+            if validate_games_config(data):
+                logger.info("✅ Descargado exitosamente games_config_merged.json desde GitHub.")
+                save_json(data, fixed_path)  # Guardar como archivo principal
+            else:
+                logger.warning("⚠️ No se pudo obtener un games_config_merged.json válido desde GitHub.")
+                data = None
+
+        # Aplicar los datos cargados o iniciar con un diccionario vacío
+        if data is not None:
             self.games_config = data
             self.games_config_path = fixed_path
             logger.info(TEXTS.get("games_config_merged", "✅ games_config_merged.json cargado automáticamente: {fixed_path}").format(fixed_path=fixed_path))
             self._log_games_summary()
+            
+            # Crear copia de respaldo local si no existe
+            if not backup_path.exists():
+                try:
+                    save_json(data, backup_path)
+                    logger.info("💾 Copia de seguridad local creada en games_config_merged_backup.json")
+                except Exception as e:
+                    logger.error(f"No se pudo guardar la copia de seguridad: {e}")
         else:
-            logger.warning(TEXTS.get("games_config_invalid", "⚠️ games_config_merged.json no contiene un objeto JSON válido."))
+            logger.error("❌ Todos los métodos de carga de games_config_merged.json fallaron. Se cargará un JSON vacío.")
             self.games_config = {}
             self.games_config_path = fixed_path
 

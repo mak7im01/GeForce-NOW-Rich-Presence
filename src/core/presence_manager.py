@@ -21,7 +21,7 @@ from src.core.app_launcher import AppLauncher
 from PyQt5.QtCore import QObject, pyqtSignal, QTimer
 
 from pypresence import Presence
-from src.core.utils import safe_json_load, save_json, CONFIG_DIR, BASE_DIR, DISCORD_CACHE_PATH, DISCORD_DETECTABLE_URL, DISCORD_CACHE_TTL, DISCORD_AUTO_APPLY_THRESHOLD, DISCORD_ASK_TIMEOUT, IS_WINDOWS, IS_MACOS, IS_LINUX
+from src.core.utils import safe_json_load, save_json, CONFIG_DIR, BASE_DIR, DISCORD_CACHE_PATH, DISCORD_DETECTABLE_URL, DISCORD_CACHE_TTL, DISCORD_AUTO_APPLY_THRESHOLD, DISCORD_ASK_TIMEOUT, IS_WINDOWS, IS_MACOS, IS_LINUX, validate_discord_cache, download_from_github
 from src.core.steam_scraper import SteamScraper, find_steam_appid_by_name
 from src.core.cookie_manager import CookieManager
 
@@ -178,6 +178,8 @@ class PresenceManager(QObject):
         
         try:
             data = safe_json_load(DISCORD_CACHE_PATH)
+            if not validate_discord_cache(data):
+                return {"status": "ERROR", "hours": 0}
             ts = data.get("_ts", 0)
             diff = time.time() - ts
             hours = diff / 3600
@@ -747,56 +749,100 @@ class PresenceManager(QObject):
         return self._http_session
 
     def _fetch_discord_apps_cached(self, force_download: bool = False):
+        backup_path = CONFIG_DIR / "discord_apps_cache_backup.json"
+        
         try:
+            # 1. Intentar cargar archivo de caché principal si no forzamos descarga y no ha expirado
             if not force_download and DISCORD_CACHE_PATH.exists():
                 data = safe_json_load(DISCORD_CACHE_PATH)
-                if data and isinstance(data, dict):
+                if validate_discord_cache(data):
                     ts = data.get("_ts", 0)
                     apps = data.get("apps", [])
                     if apps and (time.time() - ts < DISCORD_CACHE_TTL):
-                        # update last apps ts for normalized cache invalidation
                         self._last_apps_ts = ts
+                        # Si no existe la copia de respaldo, crearla
+                        if not backup_path.exists():
+                            save_json(data, backup_path)
                         return apps
 
-            sess = self._get_http_session()
-            logger.info("⬇️ Descargando lista de aplicaciones detectables de Discord...")
-            resp = sess.get(DISCORD_DETECTABLE_URL, stream=True, timeout=15)
-            if resp.status_code == 200:
-                total_size = int(resp.headers.get('content-length', 0))
-                downloaded = 0
-                chunks = []
-                self.download_progress.emit(0, total_size)
-                
-                for chunk in resp.iter_content(chunk_size=65536):
-                    if chunk:
-                        chunks.append(chunk)
-                        downloaded += len(chunk)
-                        self.download_progress.emit(downloaded, total_size)
-                
-                self.download_progress.emit(-1, -1) # Signal completion
-                
-                raw_data = b"".join(chunks)
-                apps = json.loads(raw_data)
-                
-                if apps:
-                    to_save = {"_ts": int(time.time()), "apps": apps}
-                    try:
-                        save_json(to_save, DISCORD_CACHE_PATH)
-                        self._last_apps_ts = to_save["_ts"]
-                        logger.info(f"✅ Caché de Discord actualizado ({len(apps)} apps).")
-                    except Exception:
-                        pass
-                    return apps
+            # 2. Descargar de Discord
+            apps = []
+            try:
+                sess = self._get_http_session()
+                logger.info("⬇️ Descargando lista de aplicaciones detectables de Discord...")
+                resp = sess.get(DISCORD_DETECTABLE_URL, stream=True, timeout=15)
+                if resp.status_code == 200:
+                    total_size = int(resp.headers.get('content-length', 0))
+                    downloaded = 0
+                    chunks = []
+                    self.download_progress.emit(0, total_size)
+                    
+                    for chunk in resp.iter_content(chunk_size=65536):
+                        if chunk:
+                            chunks.append(chunk)
+                            downloaded += len(chunk)
+                            self.download_progress.emit(downloaded, total_size)
+                    
+                    self.download_progress.emit(-1, -1) # Completado
+                    
+                    raw_data = b"".join(chunks)
+                    apps_loaded = json.loads(raw_data)
+                    
+                    if isinstance(apps_loaded, list) and len(apps_loaded) > 0:
+                        apps = apps_loaded
+                    else:
+                        logger.warning("⚠️ La respuesta de Discord no contiene aplicaciones válidas.")
                 else:
-                    logger.warning("⚠️ La respuesta de Discord no contiene aplicaciones.")
-            else:
-                logger.warning(f"⚠️ Error descargando de Discord: Status {resp.status_code}")
+                    logger.warning(f"⚠️ Error descargando de Discord: Status {resp.status_code}")
+                    self.download_progress.emit(-1, -1)
+            except Exception as download_err:
+                logger.warning(f"⚠️ Falló la descarga desde la API de Discord: {download_err}")
                 self.download_progress.emit(-1, -1)
+
+            # Si la descarga de Discord fue exitosa, guardar y retornar
+            if apps:
+                to_save = {"_ts": int(time.time()), "apps": apps}
+                save_json(to_save, DISCORD_CACHE_PATH)
+                save_json(to_save, backup_path)  # Actualizar respaldo también
+                self._last_apps_ts = to_save["_ts"]
+                logger.info(f"✅ Caché de Discord actualizado ({len(apps)} apps).")
+                return apps
+
+            # --- CAPA DE FALLBACKS ---
+            logger.info("🔄 Iniciando capa de fallbacks para el caché de Discord...")
+
+            # Fallback 1: Usar caché local existente (aunque esté expirada)
+            if DISCORD_CACHE_PATH.exists():
+                data = safe_json_load(DISCORD_CACHE_PATH)
+                if validate_discord_cache(data):
+                    logger.info("ℹ️ Usando caché local existente (vencido pero válido).")
+                    if not backup_path.exists():
+                        save_json(data, backup_path)
+                    self._last_apps_ts = data.get("_ts", 0)
+                    return data.get("apps", [])
+
+            # Fallback 2: Descargar respaldo de GitHub
+            github_data = download_from_github("discord_apps_cache.json")
+            if validate_discord_cache(github_data):
+                logger.info("✅ Descargada copia de seguridad de Discord desde GitHub.")
+                save_json(github_data, DISCORD_CACHE_PATH)
+                save_json(github_data, backup_path)
+                self._last_apps_ts = github_data.get("_ts", 0)
+                return github_data.get("apps", [])
+
+            # Fallback 3: Cargar copia de respaldo local (backup_path)
+            if backup_path.exists():
+                backup_data = safe_json_load(backup_path)
+                if validate_discord_cache(backup_data):
+                    logger.info("ℹ️ Cargando copia de respaldo local (backup) para Discord.")
+                    save_json(backup_data, DISCORD_CACHE_PATH)
+                    self._last_apps_ts = backup_data.get("_ts", 0)
+                    return backup_data.get("apps", [])
+
         except Exception as e:
-            logger.debug(f"Error obteniendo detectable de Discord: {e}")
+            logger.error(f"❌ Error crítico en _fetch_discord_apps_cached: {e}")
             self.download_progress.emit(-1, -1)
         return []
-
 
     def _get_normalized_apps(self):
         apps = self._fetch_discord_apps_cached()
