@@ -111,5 +111,14 @@
     "crash_title": "⚠️ Unexpected Error",
     "crash_msg": "The application has suffered an unhandled critical error. Details have been saved to logs. You can copy the error below to report it.",
     "error_copied": "Error details copied to clipboard!",
-    "gfn_install_question": "GeForce NOW is not installed or not found in the default path.\n\nDo you want to download and install GeForce NOW automatically now?"
+    "gfn_install_question": "GeForce NOW is not installed or not found in the default path.\n\nDo you want to download and install GeForce NOW automatically now?",
+    "tray_check_updates": "Check updates...",
+    "ignore_for_now": "Ignore for now",
+    "tray_install_update": "Install update",
+    "startup_disabled_in_tm": "Disabled in Task Manager",
+    "startup_re_enabled_msg": "Startup with Windows has been re-enabled.",
+    "tray_open_discord": "Open Discord",
+    "tray_startup_options": "Startup preferences",
+    "tray_diagnostic_tools": "Diagnostic tools",
+    "discord_not_found_msg": "Discord not found at the default location."
 }

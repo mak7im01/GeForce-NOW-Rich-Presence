@@ -21,10 +21,11 @@ except Exception:
 logger = logging.getLogger('geforce_presence')
 
 class SystemTrayIcon(QSystemTrayIcon):
-    def __init__(self, presence_manager, texts, config_manager, parent=None):
+    def __init__(self, presence_manager, texts, config_manager, updater=None, parent=None):
         super().__init__(parent)
         self.pm = presence_manager
         self.config_manager = config_manager
+        self.updater = updater
         TEXTS = texts
         
         self.setIcon(QIcon(str(ASSETS_DIR / "geforce.ico")))
@@ -62,6 +63,9 @@ class SystemTrayIcon(QSystemTrayIcon):
         self._reinstaller_worker = None
         self._repair_dialog = None
 
+        if self.updater:
+            self.updater.update_status_changed.connect(self.update_menu)
+
         self.create_menu()
         self.setContextMenu(self.menu)
         
@@ -81,7 +85,24 @@ class SystemTrayIcon(QSystemTrayIcon):
     def create_menu(self):
         self.menu.clear()
         
-        # Force Game
+        # Block 1: General Actions
+        # 1. Open GeForce NOW
+        open_gf_action = QAction(TEXTS.get("tray_open_geforce", "Open GeForce NOW"), self.menu)
+        open_gf_action.triggered.connect(self.open_geforce)
+        self.menu.addAction(open_gf_action)
+
+        # 2. Open Discord
+        open_discord_action = QAction(TEXTS.get("tray_open_discord", "Open Discord"), self.menu)
+        open_discord_action.triggered.connect(self.open_discord)
+        self.menu.addAction(open_discord_action)
+
+        # 3. Sync Games
+        sync_text = TEXTS.get("tray_sync_games", "Sync games")
+        sync_action = QAction(sync_text, self.menu)
+        sync_action.triggered.connect(self.sync_games)
+        self.menu.addAction(sync_action)
+
+        # 4. Force Game
         force_text = TEXTS.get("tray_force_game", "Force game...")
         if self.pm.forced_game:
             game_name = self.pm.forced_game.get('name', 'Unknown')
@@ -92,75 +113,88 @@ class SystemTrayIcon(QSystemTrayIcon):
         force_action = QAction(force_text, self.menu)
         force_action.triggered.connect(self.toggle_force_game)
         self.menu.addAction(force_action)
-        
-        # Obtain Cookie
-        cookie_action = QAction(TEXTS.get("tray_get_cookie", "Obtain Steam cookie"), self.menu)
-        cookie_action.triggered.connect(self.obtain_cookie)
-        self.menu.addAction(cookie_action)
-        
-        # Open GeForce
-        open_gf_action = QAction(TEXTS.get("tray_open_geforce", "Open GeForce NOW"), self.menu)
-        open_gf_action.triggered.connect(self.open_geforce)
-        self.menu.addAction(open_gf_action)
-        
 
-
-        # Custom Presence (Only if game active)
+        # 5. Custom Presence (Only if game active)
         active_game = self.pm.forced_game or self.pm.last_game
         if active_game:
             gname = active_game.get("name", "Unknown")
-            # Limit length
             if len(gname) > 25: gname = gname[:22] + "..."
             
             cp_action = QAction(f"Custom Presence: {gname}", self.menu)
             cp_action.triggered.connect(self.open_custom_presence_dialog)
             self.menu.addAction(cp_action)
 
-        # Configuración Submenú
-        config_menu = self.menu.addMenu(TEXTS.get("tray_config", "Configuración"))
+        self.menu.addSeparator()
+
+        # Block 2: Preferences & Credentials
+        # Startup preferences Submenu
+        startup_menu = self.menu.addMenu(TEXTS.get("tray_startup_options", "Preferencias de inicio"))
         
         # 1. Iniciar con Windows
-        start_win_action = QAction(TEXTS.get("config_start_windows", "Iniciar con Windows"), self.menu, checkable=True)
-        start_win_action.setChecked(self.config_manager.get_setting("start_with_windows", False))
+        from src.core.utils import is_startup_disabled_in_task_manager
+        start_win_enabled = self.config_manager.get_setting("start_with_windows", False)
+        is_disabled_in_tm = is_startup_disabled_in_task_manager()
+        
+        lbl_start_win = TEXTS.get("config_start_windows", "Iniciar con Windows")
+        if start_win_enabled and is_disabled_in_tm:
+            lbl_start_win += f" ({TEXTS.get('startup_disabled_in_tm', 'Deshabilitado en Administrador de tareas')})"
+            
+        start_win_action = QAction(lbl_start_win, self.menu, checkable=True)
+        start_win_action.setChecked(start_win_enabled and not is_disabled_in_tm)
         start_win_action.triggered.connect(self.toggle_start_windows)
-        config_menu.addAction(start_win_action)
+        startup_menu.addAction(start_win_action)
 
-        # 2. Iniciar GeForce NOW
+        # 2. Iniciar GeForce NOW al abrir
         start_gfn_action = QAction(TEXTS.get("config_start_gfn", "Iniciar GeForce NOW con la aplicación"), self.menu, checkable=True)
         start_gfn_action.setChecked(self.config_manager.get_setting("start_gfn_on_launch", False))
         start_gfn_action.triggered.connect(lambda chk: self.config_manager.set_setting("start_gfn_on_launch", chk))
-        config_menu.addAction(start_gfn_action)
+        startup_menu.addAction(start_gfn_action)
 
-        # 3. Iniciar Discord
+        # 3. Iniciar Discord al abrir
         start_discord_action = QAction(TEXTS.get("config_start_discord", "Iniciar Discord con la aplicación"), self.menu, checkable=True)
         start_discord_action.setChecked(self.config_manager.get_setting("start_discord_on_launch", False))
         start_discord_action.triggered.connect(lambda chk: self.config_manager.set_setting("start_discord_on_launch", chk))
-        config_menu.addAction(start_discord_action)
+        startup_menu.addAction(start_discord_action)
 
-        # 4. Obtener cookie al iniciar
+        # 4. Obtener cookie de Steam al abrir
         start_cookie_action = QAction(TEXTS.get("config_get_cookie", "Obtener cookie al iniciar la aplicación"), self.menu, checkable=True)
         start_cookie_action.setChecked(self.config_manager.get_setting("get_cookie_on_launch", True))
         start_cookie_action.triggered.connect(lambda chk: self.config_manager.set_setting("get_cookie_on_launch", chk))
-        config_menu.addAction(start_cookie_action)
+        startup_menu.addAction(start_cookie_action)
+
+        # Obtain Steam Cookie Action
+        cookie_action = QAction(TEXTS.get("tray_get_cookie", "Obtain Steam cookie"), self.menu)
+        cookie_action.triggered.connect(self.obtain_cookie)
+        self.menu.addAction(cookie_action)
 
         self.menu.addSeparator()
 
-        # Sync Games
-        sync_text = TEXTS.get("tray_sync_games", "Sync games")
-        sync_action = QAction(sync_text, self.menu)
-        sync_action.triggered.connect(self.sync_games)
-        self.menu.addAction(sync_action)
+        # Block 3: Support & System
+        # Check updates / Install update
+        if self.updater:
+            if self.updater.update_available:
+                update_lbl = f"⭐ {TEXTS.get('tray_install_update', 'Install update')} ({self.updater.update_version})"
+                install_action = QAction(update_lbl, self.menu)
+                install_action.triggered.connect(self.updater.show_update_dialog)
+                self.menu.addAction(install_action)
+            
+            check_update_action = QAction(TEXTS.get("tray_check_updates", "Check updates..."), self.menu)
+            check_update_action.triggered.connect(self.manual_check_updates)
+            self.menu.addAction(check_update_action)
+
+        # Diagnostic tools Submenu
+        diagnostic_menu = self.menu.addMenu(TEXTS.get("tray_diagnostic_tools", "Herramientas de diagnóstico"))
         
-        # Open Logs
+        # 1. Open Logs
         logs_action = QAction(TEXTS.get("tray_open_logs", "Open logs"), self.menu)
         logs_action.triggered.connect(self.open_logs)
-        self.menu.addAction(logs_action)
+        diagnostic_menu.addAction(logs_action)
 
-        # About
+        # 2. About
         about_action = QAction(TEXTS.get("about", "About"), self.menu)
         about_action.triggered.connect(self.open_about)
-        self.menu.addAction(about_action)
-        
+        diagnostic_menu.addAction(about_action)
+
         self.menu.addSeparator()
         
         # Exit
@@ -176,8 +210,14 @@ class SystemTrayIcon(QSystemTrayIcon):
             self.open_geforce()
 
     def toggle_start_windows(self, checked):
+        from src.core.utils import is_startup_disabled_in_task_manager
+        was_disabled_in_tm = is_startup_disabled_in_task_manager()
+        
         self.config_manager.set_setting("start_with_windows", checked)
         set_autostart_windows(checked)
+        
+        if checked and was_disabled_in_tm:
+            self.showMessage("GeForce NOW Presence", TEXTS.get("startup_re_enabled_msg", "Startup with Windows has been re-enabled."), QSystemTrayIcon.Information, 4000)
 
     def toggle_force_game(self):
         # 0. Check for running quests
@@ -406,6 +446,23 @@ class SystemTrayIcon(QSystemTrayIcon):
             if GamingMessageBox.show_question(None, title, msg):
                 self.on_gfn_error_detected()
 
+    def open_discord(self):
+        updater = AppLauncher.find_discord()
+        if not updater:
+            import psutil
+            is_running = False
+            for proc in psutil.process_iter(attrs=['name']):
+                name = (proc.info.get('name') or "").lower()
+                if "discord" in name and "update" not in name:
+                    is_running = True
+                    break
+            if is_running:
+                self.showMessage("Discord", TEXTS.get("already_running_discord", "💡 Discord ya se está ejecutando"), QSystemTrayIcon.Information, 3000)
+            else:
+                GamingMessageBox.show_warning(None, TEXTS.get("tray_open_discord", "Open Discord"), TEXTS.get("discord_not_found_msg", "Discord not found at the default location."))
+        else:
+            AppLauncher.launch_discord()
+
     def open_logs(self):
         from src.ui.dialogs import GamingLogViewerDialog
         try:
@@ -422,6 +479,10 @@ class SystemTrayIcon(QSystemTrayIcon):
     def open_about(self):
         dlg = AboutDialog()
         dlg.exec_()
+
+    def manual_check_updates(self):
+        if self.updater:
+            self.updater.check_for_updates(silent=False)
 
     def open_custom_presence_dialog(self):
         game = self.pm.forced_game or self.pm.last_game
