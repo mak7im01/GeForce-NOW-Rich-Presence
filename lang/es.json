@@ -111,5 +111,14 @@
     "crash_title": "⚠️ Error Inesperado",
     "crash_msg": "La aplicación ha sufrido un error crítico no controlado. Los detalles se han guardado en los logs. Puedes copiar el error abajo para reportarlo.",
     "error_copied": "¡Detalles del error copiados al portapapeles!",
-    "gfn_install_question": "GeForce NOW no está instalado o no se encuentra en la ruta por defecto.\n\n¿Deseas descargar e instalar GeForce NOW de forma automática ahora?"
+    "gfn_install_question": "GeForce NOW no está instalado o no se encuentra en la ruta por defecto.\n\n¿Deseas descargar e instalar GeForce NOW de forma automática ahora?",
+    "tray_check_updates": "Actualizar",
+    "ignore_for_now": "Ignorar por ahora",
+    "tray_install_update": "Instalar actualización",
+    "startup_disabled_in_tm": "Deshabilitado en Administrador de tareas",
+    "startup_re_enabled_msg": "Se ha vuelto a habilitar el inicio con Windows.",
+    "tray_open_discord": "Abrir Discord",
+    "tray_startup_options": "Preferencias de inicio",
+    "tray_diagnostic_tools": "Herramientas de diagnóstico",
+    "discord_not_found_msg": "Discord no se encuentra en la ruta por defecto."
 }

@@ -4,12 +4,13 @@ import logging
 import requests
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QLabel, QPushButton, QProgressBar, QMessageBox, QHBoxLayout,
     QScrollArea
 )
-from PyQt5.QtCore import QThread, pyqtSignal, Qt
+from PyQt5.QtCore import QThread, pyqtSignal, Qt, QObject
 
 from src.version import VERSION
 from src.utils.i18n import t
@@ -124,6 +125,41 @@ GAMING_STYLESHEET = """
 
 logger = logging.getLogger('geforce_presence')
 
+def get_current_lang():
+    try:
+        from src.core.utils import get_lang_from_registry
+        return get_lang_from_registry()
+    except Exception:
+        return os.getenv('GEFORCE_LANG', 'en')
+
+def filter_release_notes(body: str, lang: str) -> str:
+    if not body:
+        return ""
+    
+    import re
+    tags = re.findall(r'\[([a-zA-Z]{2})\]', body)
+    if not tags:
+        return body
+        
+    lang_upper = lang.upper()
+    tags_upper = [t.upper() for t in tags]
+    
+    if lang_upper in tags_upper:
+        target_tag = lang_upper
+    elif 'EN' in tags_upper:
+        target_tag = 'EN'
+    else:
+        target_tag = tags[0].upper()
+        
+    pattern = r'\[[a-zA-Z]{2}\]'
+    parts = re.split(pattern, body)
+    
+    for i, tag in enumerate(tags):
+        if tag.upper() == target_tag:
+            return parts[i+1].strip()
+            
+    return body
+
 GITHUB_RELEASES_URL = "https://api.github.com/repos/KarmaDevz/GeForce-NOW-Rich-Presence/releases/latest"
 
 def parse_version(v_str):
@@ -226,6 +262,7 @@ class UpdateDialog(QDialog):
         super().__init__(parent)
         self.version = version
         self.url = url
+        self.ignore_clicked = False
         self.setWindowTitle(t.get("update_available_title", "Update Available"))
         self.setWindowIcon(QIcon(str(ASSETS_DIR / "geforce.ico")))
         self.setFixedSize(400, 300)
@@ -246,7 +283,10 @@ class UpdateDialog(QDialog):
         self.notes_area.setWidgetResizable(True)
         self.notes_area.setStyleSheet("QScrollArea { border: none; background-color: transparent; }")
 
-        self.notes_box = QLabel(release_notes)
+        lang = get_current_lang()
+        filtered_notes = filter_release_notes(release_notes, lang)
+
+        self.notes_box = QLabel(filtered_notes)
         self.notes_box.setWordWrap(True)
         self.notes_box.setStyleSheet("background-color: #1a1b1d; padding: 10px; border-radius: 5px; color: #cfcfcf; border: 1px solid #2c2f33;")
         self.notes_box.setAlignment(Qt.AlignTop | Qt.AlignLeft)
@@ -263,9 +303,9 @@ class UpdateDialog(QDialog):
         btn_layout = QHBoxLayout()
         self.btn_update = QPushButton(t.get("update_now", "Update Now"))
         self.btn_update.clicked.connect(self.start_download)
-        self.btn_cancel = QPushButton(t.get("cancel", "Cancel"))
+        self.btn_cancel = QPushButton(t.get("ignore_for_now", "Ignore for now"))
         self.btn_cancel.setObjectName("secondary")
-        self.btn_cancel.clicked.connect(self.reject)
+        self.btn_cancel.clicked.connect(self.on_ignore_clicked)
 
         btn_layout.addWidget(self.btn_update)
         btn_layout.addWidget(self.btn_cancel)
@@ -274,6 +314,10 @@ class UpdateDialog(QDialog):
         self.setLayout(layout)
 
         self.worker = None
+
+    def on_ignore_clicked(self):
+        self.ignore_clicked = True
+        self.reject()
 
     def start_download(self):
         self.btn_update.setEnabled(False)
@@ -337,20 +381,112 @@ class UpdateDialog(QDialog):
         self.btn_cancel.setEnabled(True)
         self.progress_bar.setVisible(False)
 
-class Updater:
-    def __init__(self, parent_widget=None):
+class Updater(QObject):
+    update_status_changed = pyqtSignal()
+
+    def __init__(self, config_manager=None, parent_widget=None):
+        super().__init__()
+        self.config_manager = config_manager
         self.parent_widget = parent_widget
         self.worker = None
+        self.checking_updates = False
+        self.update_available = False
+        self.update_version = ""
+        self.update_url = ""
+        self.update_notes = ""
+        self.active_dialog = None
 
     def check_for_updates(self, silent=True):
+        if self.checking_updates:
+            logger.info("Comprobación de actualizaciones ya en curso. Ignorando nueva solicitud.")
+            return
+        self.checking_updates = True
         self.worker = UpdateWorker(mode="check")
         self.worker.check_finished.connect(lambda has_update, ver, url, notes: self.on_check_finished(has_update, ver, url, notes, silent))
+        self.worker.error_occurred.connect(lambda msg: self.on_check_error(msg, silent))
         self.worker.start()
 
     def on_check_finished(self, has_update, version, url, notes, silent):
-        if has_update:
-            dialog = UpdateDialog(version, url, notes, self.parent_widget)
-            dialog.exec_()
-        elif not silent:
-            QMessageBox.information(self.parent_widget, t.get("no_updates", "No Updates"), t.get("latest_version_msg", "You are using the latest version."))
+        try:
+            if has_update:
+                self.update_available = True
+                self.update_version = version
+                self.update_url = url
+                self.update_notes = notes
+                self.update_status_changed.emit()
+
+                # If silent, check if this version was already ignored and the time hasn't expired yet
+                if silent and self.config_manager:
+                    current_time = time.time()
+                    last_ignored = self.config_manager.get_setting("updater_last_ignored_version", "")
+                    ignore_until = self.config_manager.get_setting("updater_ignore_until", 0.0)
+                    
+                    if last_ignored == version and current_time < ignore_until:
+                        logger.info(f"Actualización automática a {version} pospuesta hasta {time.ctime(ignore_until)} (ignorado).")
+                        return
+
+                self.show_update_dialog()
+            else:
+                self.update_available = False
+                self.update_version = ""
+                self.update_url = ""
+                self.update_notes = ""
+                self.update_status_changed.emit()
+                if not silent:
+                    QMessageBox.information(self.parent_widget, t.get("no_updates", "No Updates"), t.get("latest_version_msg", "You are using the latest version."))
+        finally:
+            self.checking_updates = False
+
+    def on_check_error(self, msg, silent):
+        try:
+            if not silent:
+                QMessageBox.critical(self.parent_widget, "Error", f"Error al comprobar actualizaciones: {msg}")
+        finally:
+            self.checking_updates = False
+
+    def show_update_dialog(self):
+        if not self.update_available:
+            return
+
+        if self.active_dialog is not None:
+            try:
+                self.active_dialog.raise_()
+                self.active_dialog.activateWindow()
+                return
+            except RuntimeError:
+                self.active_dialog = None
+
+        self.active_dialog = UpdateDialog(self.update_version, self.update_url, self.update_notes, self.parent_widget)
+        self.active_dialog.exec_()
+        
+        ignore_clicked = self.active_dialog.ignore_clicked
+        self.active_dialog = None
+        
+        if ignore_clicked:
+            self.save_ignore_settings(self.update_version)
+            self.update_status_changed.emit()
+
+    def save_ignore_settings(self, version):
+        if not self.config_manager:
+            return
+        
+        current_time = time.time()
+        last_ignored = self.config_manager.get_setting("updater_last_ignored_version", "")
+        next_ignore_days = self.config_manager.get_setting("updater_next_ignore_days", 7)
+        
+        # Reset count if it's a new version
+        if last_ignored != version:
+            next_ignore_days = 7
+        
+        # postpone duration
+        ignore_until = current_time + (next_ignore_days * 24 * 60 * 60)
+        
+        # next ignore duration
+        escalated_next_days = min(next_ignore_days + 7, 21)
+        
+        self.config_manager.set_setting("updater_last_ignored_version", version)
+        self.config_manager.set_setting("updater_next_ignore_days", escalated_next_days)
+        self.config_manager.set_setting("updater_ignore_until", ignore_until)
+        
+        logger.info(f"Actualización a {version} ignorada por {next_ignore_days} días (hasta {time.ctime(ignore_until)}). Próximo aplazamiento será de {escalated_next_days} días.")
     

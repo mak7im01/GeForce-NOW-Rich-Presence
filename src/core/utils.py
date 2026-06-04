@@ -141,6 +141,18 @@ def set_autostart_windows(enable: bool):
                 shortcut.arguments = arguments
                 shortcut.description = "Start GeForce NOW Rich Presence"
             logger.info("✅ Acceso directo creado en shell:startup para iniciar con Windows (retraso 60s).")
+
+            # Intentar rehabilitar en StartupApproved si estaba deshabilitado
+            try:
+                import winreg
+                key_path = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder"
+                key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE)
+                enabled_bytes = b'\x02\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
+                winreg.SetValueEx(key, f"{app_name}.lnk", 0, winreg.REG_BINARY, enabled_bytes)
+                winreg.CloseKey(key)
+                logger.info("✅ Estado rehabilitado en StartupApproved.")
+            except Exception as reg_err:
+                logger.debug(f"No se pudo escribir en StartupApproved: {reg_err}")
         else:
             # Eliminar el acceso directo
             if os.path.exists(shortcut_path):
@@ -337,3 +349,24 @@ def calculate_file_hash(path: Path, algorithm: str = "sha256") -> Optional[str]:
     except Exception as e:
         logger.error(f"Error calculando hash de {path}: {e}")
         return None
+
+def is_startup_disabled_in_task_manager() -> bool:
+    if not IS_WINDOWS:
+        return False
+    try:
+        import winreg
+        key_path = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder"
+        try:
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path)
+            data, reg_type = winreg.QueryValueEx(key, "GeForceNOWRichPresence.lnk")
+            winreg.CloseKey(key)
+            if reg_type == winreg.REG_BINARY and len(data) > 0:
+                first_byte = data[0]
+                # Odd value means disabled
+                return (first_byte & 1) != 0
+        except FileNotFoundError:
+            # If the value does not exist, it is not disabled
+            return False
+    except Exception as e:
+        logger.error(f"Error checking startup approval status: {e}")
+    return False

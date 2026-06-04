@@ -182,12 +182,12 @@ def main():
     exception_signaler = ExceptionSignaler()
     exception_signaler.exception_caught.connect(show_crash_dialog_slot)
 
-    # 5. Check for Updates
-    updater = Updater()
-    updater.check_for_updates(silent=True)
-
-    # 6. Initialize Managers First (moved up so we can read settings)
+    # 5. Initialize Managers First
     config_manager = ConfigManager(CONFIG_DIR / "config_path.txt")
+
+    # 5.1 Check for Updates
+    updater = Updater(config_manager=config_manager)
+    updater.check_for_updates(silent=True)
 
     if config_manager.get_setting("start_with_windows", False):
         try:
@@ -244,7 +244,7 @@ def main():
     presence_manager.close_fake_executable()
 
     # 7. Initialize UI
-    tray_icon = SystemTrayIcon(presence_manager, texts, config_manager)
+    tray_icon = SystemTrayIcon(presence_manager, texts, config_manager, updater=updater)
     tray_icon.show()
 
     # 8. Start Monitoring
