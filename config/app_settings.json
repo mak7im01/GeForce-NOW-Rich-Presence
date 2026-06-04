@@ -1,9 +1,6 @@
 {
     "start_with_windows": false,
-    "start_gfn_on_launch": true,
+    "start_gfn_on_launch": false,
     "start_discord_on_launch": false,
-    "get_cookie_on_launch": false,
-    "updater_last_ignored_version": "v10.0.0",
-    "updater_next_ignore_days": 14,
-    "updater_ignore_until": 1781213651.0505977
+    "get_cookie_on_launch": false
 }
