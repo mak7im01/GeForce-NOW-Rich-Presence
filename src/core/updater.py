@@ -163,7 +163,7 @@ def filter_release_notes(body: str, lang: str) -> str:
 GITHUB_RELEASES_URL = "https://api.github.com/repos/KarmaDevz/GeForce-NOW-Rich-Presence/releases/latest"
 
 def parse_version(v_str):
-    """Simple semantic version parser (e.g., '1.0.0' -> (1, 0, 0))"""
+    #"Simple semantic version parser ('1.0.0' -> (1, 0, 0))"
     try:
         return tuple(map(int, v_str.lstrip('v').split('.')))
     except Exception:

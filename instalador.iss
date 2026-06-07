@@ -76,7 +76,10 @@ Parameters: "/IM GeForceNOWRichPresence.exe /F"; \
 Flags: runhidden skipifdoesntexist
 
 [UninstallDelete]
-Type: filesandordirs; Name: "{tmp}\discord_fake_games"
+Type: filesandordirs; Name: "{temp}\discord_fake_game"
+Type: filesandordirs; Name: "{temp}\discord_quests"
+Type: filesandordirs; Name: "{temp}\geforce_update"
+Type: filesandordirs; Name: "{temp}\geforce_driver"
 
 [Code]
 
