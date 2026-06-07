@@ -1,0 +1,102 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        include:
+          - os: windows-latest
+            artifact_name: GeForceNOWRichPresence-Windows.zip
+            asset_path: dist/GeForceNOWRichPresence-Windows.zip
+          - os: ubuntu-latest
+            artifact_name: GeForceNOWRichPresence-Linux.tar.gz
+            asset_path: dist/GeForceNOWRichPresence-Linux.tar.gz
+          - os: macos-latest
+            artifact_name: GeForceNOWRichPresence-macOS.zip
+            asset_path: dist/GeForceNOWRichPresence-macOS.zip
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build executable
+        run: |
+          pyinstaller --clean --noconfirm GeForceNOWRichPresence.spec
+
+      - name: Packaging - Windows
+        if: matrix.os == 'windows-latest'
+        run: |
+          cd dist
+          Compress-Archive -Path GeForceNOWRichPresence -DestinationPath GeForceNOWRichPresence-Windows.zip
+        shell: pwsh
+
+      - name: Packaging - Linux
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          cd dist
+          tar -czf GeForceNOWRichPresence-Linux.tar.gz GeForceNOWRichPresence
+        shell: bash
+
+      - name: Packaging - macOS
+        if: matrix.os == 'macos-latest'
+        run: |
+          cd dist
+          zip -r GeForceNOWRichPresence-macOS.zip GeForceNOWRichPresence
+        shell: bash
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.asset_path }}
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist-artifacts
+
+      - name: Flatten folder structure for release
+        run: |
+          mkdir release-assets
+          find dist-artifacts/ -name "*.zip" -exec cp {} release-assets/ \;
+          find dist-artifacts/ -name "*.tar.gz" -exec cp {} release-assets/ \;
+          ls -R release-assets
+
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
