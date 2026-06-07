@@ -62,6 +62,8 @@ class SystemTrayIcon(QSystemTrayIcon):
         
         self._reinstaller_worker = None
         self._repair_dialog = None
+        self._download_progress_dlg = None
+        self._download_cancelled = False
 
         if self.updater:
             self.updater.update_status_changed.connect(self.update_menu)
@@ -512,6 +514,10 @@ class SystemTrayIcon(QSystemTrayIcon):
                 self._download_progress_dlg.close()
                 self._download_progress_dlg.deleteLater()
                 self._download_progress_dlg = None
+            self._download_cancelled = False
+            return
+
+        if getattr(self, '_download_cancelled', False):
             return
 
         if not getattr(self, '_download_progress_dlg', None):
@@ -537,10 +543,11 @@ class SystemTrayIcon(QSystemTrayIcon):
             self._download_progress_dlg.setLabelText(msg)
             QApplication.processEvents()
             
-            if self._download_progress_dlg.wasCanceled():
+            if self._download_progress_dlg and self._download_progress_dlg.wasCanceled():
                 self._download_progress_dlg.close()
                 self._download_progress_dlg.deleteLater()
                 self._download_progress_dlg = None
+                self._download_cancelled = True
 
     def sync_games(self):
         status = self.pm.check_discord_cache_status()
