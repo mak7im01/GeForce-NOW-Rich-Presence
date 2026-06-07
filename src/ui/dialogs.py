@@ -754,7 +754,8 @@ class AboutDialog(QDialog):
         layout.setSpacing(15)
         
         # Title
-        title = QLabel("GeForce NOW Rich Presence")
+        from src.version import VERSION
+        title = QLabel(f"GeForce NOW Rich Presence {VERSION}")
         title.setObjectName("title_label")
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)

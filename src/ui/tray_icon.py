@@ -179,10 +179,10 @@ class SystemTrayIcon(QSystemTrayIcon):
                 install_action = QAction(update_lbl, self.menu)
                 install_action.triggered.connect(self.updater.show_update_dialog)
                 self.menu.addAction(install_action)
-            
-            check_update_action = QAction(TEXTS.get("tray_check_updates", "Check updates..."), self.menu)
-            check_update_action.triggered.connect(self.manual_check_updates)
-            self.menu.addAction(check_update_action)
+            else:
+                check_update_action = QAction(TEXTS.get("tray_check_updates", "Check updates..."), self.menu)
+                check_update_action.triggered.connect(self.manual_check_updates)
+                self.menu.addAction(check_update_action)
 
         # Diagnostic tools Submenu
         diagnostic_menu = self.menu.addMenu(TEXTS.get("tray_diagnostic_tools", "Herramientas de diagnóstico"))
@@ -195,7 +195,7 @@ class SystemTrayIcon(QSystemTrayIcon):
         # 2. About
         about_action = QAction(TEXTS.get("about", "About"), self.menu)
         about_action.triggered.connect(self.open_about)
-        diagnostic_menu.addAction(about_action)
+        self.menu.addAction(about_action)
 
         self.menu.addSeparator()
         

@@ -200,25 +200,36 @@ class UpdateWorker(QThread):
             logger.info(f"📦 Version actual: {VERSION}, Última versión GitHub: {latest_version_str}")
 
             if latest_version > current_version:
-                # Buscar asset .zip primero para actualización silenciosa, sino caer en el instalador .exe
+                from src.core.utils import IS_WINDOWS, IS_MACOS, IS_LINUX
                 update_url = None
+                
+                # Buscar asset de actualización silenciosa específico para la plataforma
                 for asset in data.get("assets", []):
-                    if asset["name"].lower().endswith(".zip"):
+                    name_lower = asset["name"].lower()
+                    if IS_WINDOWS and name_lower.endswith(".zip") and "windows" in name_lower:
                         update_url = asset["browser_download_url"]
-                        logger.info("Encontrado asset de actualización silenciosa (.zip).")
+                        logger.info("Encontrado asset de actualización silenciosa de Windows (.zip).")
+                        break
+                    elif IS_MACOS and name_lower.endswith(".zip") and "macos" in name_lower:
+                        update_url = asset["browser_download_url"]
+                        logger.info("Encontrado asset de actualización silenciosa de macOS (.zip).")
+                        break
+                    elif IS_LINUX and name_lower.endswith(".tar.gz") and "linux" in name_lower:
+                        update_url = asset["browser_download_url"]
+                        logger.info("Encontrado asset de actualización silenciosa de Linux (.tar.gz).")
                         break
                 
-                if not update_url:
+                if not update_url and IS_WINDOWS:
                     for asset in data.get("assets", []):
                         if asset["name"].lower().endswith(".exe"):
                             update_url = asset["browser_download_url"]
-                            logger.info("Encontrado instalador de actualización tradicional (.exe).")
+                            logger.info("Encontrado instalador de actualización de Windows (.exe).")
                             break
                 
                 if update_url:
                     self.check_finished.emit(True, latest_version_str, update_url, data.get("body", ""))
                 else:
-                    logger.warning("Nueva versión encontrada pero no se encontró un archivo .zip o .exe válido.")
+                    logger.warning("Nueva versión encontrada pero no se encontró un archivo de actualización compatible para la plataforma.")
                     self.check_finished.emit(False, "", "", "")
             else:
                 self.check_finished.emit(False, "", "", "")
