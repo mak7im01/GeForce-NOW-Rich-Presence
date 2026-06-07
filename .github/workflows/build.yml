@@ -47,22 +47,31 @@ jobs:
       - name: Packaging - Windows
         if: matrix.os == 'windows-latest'
         run: |
-          cd dist
-          Compress-Archive -Path GeForceNOWRichPresence -DestinationPath GeForceNOWRichPresence-Windows.zip
+          # 1. Compress folder contents into a ZIP file for silent updates
+          cd dist/GeForceNOWRichPresence
+          Compress-Archive -Path * -DestinationPath ../GeForceNOWRichPresence-Windows.zip
+          cd ../..
+          # 2. Compile Inno Setup Installer
+          cp LICENSE dist/GeForceNOWRichPresence/LICENSE.txt
+          cp LICENCE_es dist/GeForceNOWRichPresence/LICENSE_es.txt
+          cp instalador.iss dist/GeForceNOWRichPresence/
+          $raw_ver = "${{ github.ref_name }}"
+          if ($raw_ver.StartsWith("v")) { $ver = $raw_ver.Substring(1) } else { $ver = $raw_ver }
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /dAppVersion=$ver /Odist /FGeForcePresenceSetupv$ver dist/GeForceNOWRichPresence/instalador.iss
         shell: pwsh
 
       - name: Packaging - Linux
         if: matrix.os == 'ubuntu-latest'
         run: |
-          cd dist
-          tar -czf GeForceNOWRichPresence-Linux.tar.gz GeForceNOWRichPresence
+          cd dist/GeForceNOWRichPresence
+          tar -czf ../GeForceNOWRichPresence-Linux.tar.gz .
         shell: bash
 
       - name: Packaging - macOS
         if: matrix.os == 'macos-latest'
         run: |
-          cd dist
-          zip -r GeForceNOWRichPresence-macOS.zip GeForceNOWRichPresence
+          cd dist/GeForceNOWRichPresence
+          zip -r ../GeForceNOWRichPresence-macOS.zip .
         shell: bash
 
       - name: Upload artifact
@@ -70,6 +79,13 @@ jobs:
         with:
           name: ${{ matrix.artifact_name }}
           path: ${{ matrix.asset_path }}
+
+      - name: Upload Installer Artifact (Windows only)
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: GeForceNOWRichPresence-Installer
+          path: dist/GeForcePresenceSetupv*.exe
 
   release:
     name: Create GitHub Release
@@ -92,6 +108,7 @@ jobs:
           mkdir release-assets
           find dist-artifacts/ -name "*.zip" -exec cp {} release-assets/ \;
           find dist-artifacts/ -name "*.tar.gz" -exec cp {} release-assets/ \;
+          find dist-artifacts/ -name "*.exe" -exec cp {} release-assets/ \;
           ls -R release-assets
 
       - name: Create Release and Upload Assets
