@@ -346,41 +346,63 @@ class UpdateDialog(QDialog):
         try:
             logger.info(f"Launching installer: {installer_path}")
             
-            if installer_path.lower().endswith(".zip"):
+            if installer_path.lower().endswith(".zip") or installer_path.lower().endswith(".tar.gz"):
                 if getattr(sys, "frozen", False):
+                    from src.core.utils import IS_WINDOWS, IS_MACOS, IS_LINUX
                     pid = os.getpid()
-                    zip_path = str(installer_path)
+                    archive_path = str(installer_path)
                     install_dir = str(Path(sys.executable).parent)
                     exe_path = str(sys.executable)
                     
-                    # Comando de PowerShell en una línea:
-                    # 1. Duerme 1s
-                    # 2. Espera a que el proceso actual finalice y libere los archivos
-                    # 3. Extrae el zip directamente sobre la ruta de instalación (sobreescribiendo con -Force)
-                    # 4. Elimina el zip temporal
-                    # 5. Inicia el nuevo ejecutable actualizado
-                    powershell_cmd = (
-                        f"Start-Sleep -Seconds 1; "
-                        f"while (Get-Process -Id {pid} -ErrorAction SilentlyContinue) {{ Start-Sleep -Milliseconds 100 }}; "
-                        f"Expand-Archive -Path '{zip_path}' -DestinationPath '{install_dir}' -Force; "
-                        f"Remove-Item -Path '{zip_path}' -Force; "
-                        f"Start-Process -FilePath '{exe_path}'"
-                    )
-                    
-                    logger.info(f"Ejecutando auto-actualizador silencioso en segundo plano: {powershell_cmd}")
-                    
-                    subprocess.Popen(
-                        ["powershell", "-Command", powershell_cmd],
-                        creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-                    )
-                    sys.exit(0)
+                    if IS_WINDOWS:
+                        # PowerShell auto-update for Windows
+                        powershell_cmd = (
+                            f"Start-Sleep -Seconds 1; "
+                            f"while (Get-Process -Id {pid} -ErrorAction SilentlyContinue) {{ Start-Sleep -Milliseconds 100 }}; "
+                            f"Expand-Archive -Path '{archive_path}' -DestinationPath '{install_dir}' -Force; "
+                            f"Remove-Item -Path '{archive_path}' -Force; "
+                            f"Start-Process -FilePath '{exe_path}'"
+                        )
+                        logger.info(f"Ejecutando auto-actualizador silencioso en segundo plano (Windows): {powershell_cmd}")
+                        subprocess.Popen(
+                            ["powershell", "-Command", powershell_cmd],
+                            creationflags=subprocess.CREATE_NO_WINDOW
+                        )
+                        sys.exit(0)
+                        
+                    elif IS_MACOS:
+                        # Bash auto-update for macOS (using unzip)
+                        bash_cmd = (
+                            f"sleep 1; "
+                            f"while kill -0 {pid} 2>/dev/null; do sleep 0.1; done; "
+                            f"unzip -o '{archive_path}' -d '{install_dir}'; "
+                            f"rm '{archive_path}'; "
+                            f"open '{exe_path}'"
+                        )
+                        logger.info(f"Ejecutando auto-actualizador silencioso en segundo plano (macOS): {bash_cmd}")
+                        subprocess.Popen(["bash", "-c", bash_cmd])
+                        sys.exit(0)
+                        
+                    elif IS_LINUX:
+                        # Bash auto-update for Linux (using tar)
+                        bash_cmd = (
+                            f"sleep 1; "
+                            f"while kill -0 {pid} 2>/dev/null; do sleep 0.1; done; "
+                            f"tar -xzf '{archive_path}' -C '{install_dir}'; "
+                            f"rm '{archive_path}'; "
+                            f"chmod +x '{exe_path}'; "
+                            f"'{exe_path}' &"
+                        )
+                        logger.info(f"Ejecutando auto-actualizador silencioso en segundo plano (Linux): {bash_cmd}")
+                        subprocess.Popen(["bash", "-c", bash_cmd])
+                        sys.exit(0)
                 else:
-                    msg = f"Modo de desarrollo: Actualización descargada en {installer_path}.\nLa auto-actualización silenciosa solo funciona en la versión compilada (.exe)."
+                    msg = f"Modo de desarrollo: Actualización descargada en {installer_path}.\nLa auto-actualización silenciosa solo funciona en la versión compilada."
                     logger.info(msg)
                     QMessageBox.information(self, "Desarrollo", msg)
                     self.accept()
             else:
-                # Launch installer wizard (.exe) and exit
+                # Launch installer wizard (.exe) on Windows if not a zip and exit
                 subprocess.Popen([installer_path], shell=True)
                 sys.exit(0)
         except Exception as e:
