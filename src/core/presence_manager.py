@@ -766,53 +766,87 @@ class PresenceManager(QObject):
                             save_json(data, backup_path)
                         return apps
 
-            # 2. Descargar de Discord
+            # 2. Determinar orden de descarga según si es actualización automática o forzada por el usuario
             apps = []
-            try:
-                sess = self._get_http_session()
-                logger.info("⬇️ Descargando lista de aplicaciones detectables de Discord...")
-                resp = sess.get(DISCORD_DETECTABLE_URL, stream=True, timeout=15)
-                if resp.status_code == 200:
-                    total_size = int(resp.headers.get('content-length', 0))
-                    downloaded = 0
-                    chunks = []
-                    self.download_progress.emit(0, total_size)
-                    
-                    for chunk in resp.iter_content(chunk_size=65536):
-                        if chunk:
-                            chunks.append(chunk)
-                            downloaded += len(chunk)
-                            self.download_progress.emit(downloaded, total_size)
-                    
-                    self.download_progress.emit(-1, -1) # Completado
-                    
-                    raw_data = b"".join(chunks)
-                    apps_loaded = json.loads(raw_data)
-                    
-                    if isinstance(apps_loaded, list) and len(apps_loaded) > 0:
-                        apps = apps_loaded
+            download_success = False
+            github_url = "https://raw.githubusercontent.com/KarmaDevz/GeForce-NOW-Rich-Presence/master/config/discord_apps_cache.json"
+            
+            # Si se fuerza la descarga (solicitada manualmente por el usuario/desarrollador),
+            # le damos prioridad a Discord para obtener los datos más recientes de la API oficial.
+            # Si es una descarga automática en segundo plano (cache expirada), priorizamos GitHub para ahorrar rate-limit y velocidad.
+            if force_download:
+                sources = [("DISCORD API", DISCORD_DETECTABLE_URL), ("GITHUB", github_url)]
+            else:
+                sources = [("GITHUB", github_url), ("DISCORD API", DISCORD_DETECTABLE_URL)]
+
+            for source_name, url in sources:
+                try:
+                    sess = self._get_http_session()
+                    if source_name == "GITHUB":
+                        logger.info("⬇️ Descargando lista de aplicaciones desde GitHub (Caché en la nube)...")
                     else:
-                        logger.warning("⚠️ La respuesta de Discord no contiene aplicaciones válidas.")
-                else:
-                    logger.warning(f"⚠️ Error descargando de Discord: Status {resp.status_code}")
-                    self.download_progress.emit(-1, -1)
-            except Exception as download_err:
-                logger.warning(f"⚠️ Falló la descarga desde la API de Discord: {download_err}")
+                        logger.info("⬇️ Descargando lista de aplicaciones detectables desde la API de Discord...")
+                        
+                    resp = sess.get(url, stream=True, timeout=15)
+                    if resp.status_code == 200:
+                        total_size = int(resp.headers.get('content-length', 0))
+                        downloaded = 0
+                        chunks = []
+                        self.download_progress.emit(0, total_size)
+                        
+                        for chunk in resp.iter_content(chunk_size=65536):
+                            if chunk:
+                                chunks.append(chunk)
+                                downloaded += len(chunk)
+                                self.download_progress.emit(downloaded, total_size)
+                        
+                        self.download_progress.emit(-1, -1) # Completado
+                        
+                        raw_data = b"".join(chunks)
+                        loaded_data = json.loads(raw_data)
+                        
+                        if source_name == "GITHUB":
+                            if validate_discord_cache(loaded_data):
+                                apps = loaded_data.get("apps", [])
+                                # Usamos el tiempo actual en lugar del estático del JSON de GitHub
+                                # para evitar un bucle de expiración infinita en el cliente.
+                                ts = int(time.time())
+                                source_type = "github"
+                                download_success = True
+                            else:
+                                logger.warning("⚠️ El caché descargado de GitHub no es válido.")
+                        else: # DISCORD API
+                            if isinstance(loaded_data, list) and len(loaded_data) > 0:
+                                apps = loaded_data
+                                ts = int(time.time())
+                                source_type = "discord"
+                                download_success = True
+                            else:
+                                logger.warning("⚠️ La respuesta de Discord no contiene aplicaciones válidas.")
+                                
+                        if download_success:
+                            to_save = {"_ts": ts, "source": source_type, "apps": apps}
+                            save_json(to_save, DISCORD_CACHE_PATH)
+                            save_json(to_save, backup_path)
+                            self._last_apps_ts = to_save["_ts"]
+                            logger.info(f"✅ Caché de Discord actualizado desde {source_name} ({len(apps)} apps).")
+                            break
+                    else:
+                        logger.warning(f"⚠️ Error descargando de {source_name}: Status {resp.status_code}")
+                except Exception as err:
+                    logger.warning(f"⚠️ Falló la descarga desde {source_name}: {err}")
+
+            if not download_success:
+                # Si fallaron las descargas de red, emitir fin de barra de progreso
                 self.download_progress.emit(-1, -1)
 
-            # Si la descarga de Discord fue exitosa, guardar y retornar
-            if apps:
-                to_save = {"_ts": int(time.time()), "apps": apps}
-                save_json(to_save, DISCORD_CACHE_PATH)
-                save_json(to_save, backup_path)  # Actualizar respaldo también
-                self._last_apps_ts = to_save["_ts"]
-                logger.info(f"✅ Caché de Discord actualizado ({len(apps)} apps).")
+            if download_success:
                 return apps
 
-            # --- CAPA DE FALLBACKS ---
-            logger.info("🔄 Iniciando capa de fallbacks para el caché de Discord...")
+            # --- CAPA DE FALLBACKS LOCALES (SI TODO FALLÓ) ---
+            logger.info("🔄 Iniciando capa de fallbacks locales para el caché de Discord...")
 
-            # Fallback 1: Usar caché local existente (aunque esté expirada)
+            # Fallback local 1: Usar caché local existente (aunque esté expirada)
             if DISCORD_CACHE_PATH.exists():
                 data = safe_json_load(DISCORD_CACHE_PATH)
                 if validate_discord_cache(data):
@@ -822,16 +856,7 @@ class PresenceManager(QObject):
                     self._last_apps_ts = data.get("_ts", 0)
                     return data.get("apps", [])
 
-            # Fallback 2: Descargar respaldo de GitHub
-            github_data = download_from_github("discord_apps_cache.json")
-            if validate_discord_cache(github_data):
-                logger.info("✅ Descargada copia de seguridad de Discord desde GitHub.")
-                save_json(github_data, DISCORD_CACHE_PATH)
-                save_json(github_data, backup_path)
-                self._last_apps_ts = github_data.get("_ts", 0)
-                return github_data.get("apps", [])
-
-            # Fallback 3: Cargar copia de respaldo local (backup_path)
+            # Fallback local 2: Cargar copia de respaldo local (backup_path)
             if backup_path.exists():
                 backup_data = safe_json_load(backup_path)
                 if validate_discord_cache(backup_data):
@@ -1094,6 +1119,18 @@ class PresenceManager(QObject):
                 try:
                     self._ongoing_match_jobs.add(game_key)
                     candidates = self._find_discord_matches(game_key, max_candidates=6)
+                    
+                    if not candidates:
+                        # Si no hay candidatos, podría ser un juego muy nuevo no incluido en el caché de GitHub.
+                        # Verificamos si la caché actual vino de GitHub; si es así, forzamos la descarga desde la API
+                        # de Discord una sola vez (esto cambiará el origen a 'discord' en el JSON y evitará reintentos).
+                        cache_data = safe_json_load(DISCORD_CACHE_PATH) or {}
+                        if cache_data.get("source", "github") == "github":
+                            logger.info(f"🔍 '{game_key}' no encontrado en el caché de GitHub. Buscando en la API oficial de Discord...")
+                            apps = self._fetch_discord_apps_cached(force_download=True)
+                            if apps:
+                                candidates = self._find_discord_matches(game_key, max_candidates=6)
+
                     if not candidates:
                         logger.info(f"ℹ️ No se encontraron matches en Discord para '{game_key}'")
                         return
