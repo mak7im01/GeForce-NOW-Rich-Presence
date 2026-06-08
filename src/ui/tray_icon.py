@@ -5,7 +5,7 @@ from PyQt5.QtWidgets import QSystemTrayIcon, QMenu, QAction, QApplication, QMess
 from PyQt5.QtGui import QIcon
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QDialog
-from src.core.utils import ASSETS_DIR, LOG_FILE, set_autostart_windows
+from src.core.utils import ASSETS_DIR, LOG_FILE, set_autostart_windows, IS_WINDOWS, IS_MACOS, IS_LINUX
 from src.core.app_launcher import AppLauncher
 from src.ui.dialogs import AskGameDialog, MatchSelectionDialog, GamingMessageBox, GamingInputDialog, QuestListDialog, CustomPresenceDialog, AboutDialog, GFNRepairDialog, GAMING_STYLESHEET
 from src.core.utils import get_lang_from_registry, load_locale
@@ -88,22 +88,23 @@ class SystemTrayIcon(QSystemTrayIcon):
         self.menu.clear()
         
         # Block 1: General Actions
-        # 1. Open GeForce NOW
-        open_gf_action = QAction(TEXTS.get("tray_open_geforce", "Open GeForce NOW"), self.menu)
-        open_gf_action.triggered.connect(self.open_geforce)
-        self.menu.addAction(open_gf_action)
-
+        # 1. Open GeForce NOW (Only on Windows and macOS)
+        if IS_WINDOWS or IS_MACOS:
+            open_gf_action = QAction(TEXTS.get("tray_open_geforce", "Open GeForce NOW"), self.menu)
+            open_gf_action.triggered.connect(self.open_geforce)
+            self.menu.addAction(open_gf_action)
+ 
         # 2. Open Discord
         open_discord_action = QAction(TEXTS.get("tray_open_discord", "Open Discord"), self.menu)
         open_discord_action.triggered.connect(self.open_discord)
         self.menu.addAction(open_discord_action)
-
+ 
         # 3. Sync Games
         sync_text = TEXTS.get("tray_sync_games", "Sync games")
         sync_action = QAction(sync_text, self.menu)
         sync_action.triggered.connect(self.sync_games)
         self.menu.addAction(sync_action)
-
+ 
         # 4. Force Game
         force_text = TEXTS.get("tray_force_game", "Force game...")
         if self.pm.forced_game:
@@ -115,7 +116,7 @@ class SystemTrayIcon(QSystemTrayIcon):
         force_action = QAction(force_text, self.menu)
         force_action.triggered.connect(self.toggle_force_game)
         self.menu.addAction(force_action)
-
+ 
         # 5. Custom Presence (Only if game active)
         active_game = self.pm.forced_game or self.pm.last_game
         if active_game:
@@ -125,50 +126,53 @@ class SystemTrayIcon(QSystemTrayIcon):
             cp_action = QAction(f"Custom Presence: {gname}", self.menu)
             cp_action.triggered.connect(self.open_custom_presence_dialog)
             self.menu.addAction(cp_action)
-
+ 
         self.menu.addSeparator()
-
+ 
         # Block 2: Preferences & Credentials
         # Startup preferences Submenu
         startup_menu = self.menu.addMenu(TEXTS.get("tray_startup_options", "Preferencias de inicio"))
         
-        # 1. Iniciar con Windows
-        from src.core.utils import is_startup_disabled_in_task_manager
-        start_win_enabled = self.config_manager.get_setting("start_with_windows", False)
-        is_disabled_in_tm = is_startup_disabled_in_task_manager()
-        
-        lbl_start_win = TEXTS.get("config_start_windows", "Iniciar con Windows")
-        if start_win_enabled and is_disabled_in_tm:
-            lbl_start_win += f" ({TEXTS.get('startup_disabled_in_tm', 'Deshabilitado en Administrador de tareas')})"
+        # 1. Iniciar con Windows (Only on Windows)
+        if IS_WINDOWS:
+            from src.core.utils import is_startup_disabled_in_task_manager
+            start_win_enabled = self.config_manager.get_setting("start_with_windows", False)
+            is_disabled_in_tm = is_startup_disabled_in_task_manager()
             
-        start_win_action = QAction(lbl_start_win, self.menu, checkable=True)
-        start_win_action.setChecked(start_win_enabled and not is_disabled_in_tm)
-        start_win_action.triggered.connect(self.toggle_start_windows)
-        startup_menu.addAction(start_win_action)
-
-        # 2. Iniciar GeForce NOW al abrir
-        start_gfn_action = QAction(TEXTS.get("config_start_gfn", "Iniciar GeForce NOW con la aplicación"), self.menu, checkable=True)
-        start_gfn_action.setChecked(self.config_manager.get_setting("start_gfn_on_launch", False))
-        start_gfn_action.triggered.connect(lambda chk: self.config_manager.set_setting("start_gfn_on_launch", chk))
-        startup_menu.addAction(start_gfn_action)
-
-        # 3. Iniciar Discord al abrir
+            lbl_start_win = TEXTS.get("config_start_windows", "Iniciar con Windows")
+            if start_win_enabled and is_disabled_in_tm:
+                lbl_start_win += f" ({TEXTS.get('startup_disabled_in_tm', 'Deshabilitado en Administrador de tareas')})"
+                
+            start_win_action = QAction(lbl_start_win, self.menu, checkable=True)
+            start_win_action.setChecked(start_win_enabled and not is_disabled_in_tm)
+            start_win_action.triggered.connect(self.toggle_start_windows)
+            startup_menu.addAction(start_win_action)
+ 
+        # 2. Iniciar GeForce NOW al abrir (Only on Windows and macOS)
+        if IS_WINDOWS or IS_MACOS:
+            start_gfn_action = QAction(TEXTS.get("config_start_gfn", "Iniciar GeForce NOW con la aplicación"), self.menu, checkable=True)
+            start_gfn_action.setChecked(self.config_manager.get_setting("start_gfn_on_launch", False))
+            start_gfn_action.triggered.connect(lambda chk: self.config_manager.set_setting("start_gfn_on_launch", chk))
+            startup_menu.addAction(start_gfn_action)
+ 
+        # 3. Iniciar Discord al abrir (All platforms)
         start_discord_action = QAction(TEXTS.get("config_start_discord", "Iniciar Discord con la aplicación"), self.menu, checkable=True)
         start_discord_action.setChecked(self.config_manager.get_setting("start_discord_on_launch", False))
         start_discord_action.triggered.connect(lambda chk: self.config_manager.set_setting("start_discord_on_launch", chk))
         startup_menu.addAction(start_discord_action)
-
-        # 4. Obtener cookie de Steam al abrir
-        start_cookie_action = QAction(TEXTS.get("config_get_cookie", "Obtener cookie al iniciar la aplicación"), self.menu, checkable=True)
-        start_cookie_action.setChecked(self.config_manager.get_setting("get_cookie_on_launch", True))
-        start_cookie_action.triggered.connect(lambda chk: self.config_manager.set_setting("get_cookie_on_launch", chk))
-        startup_menu.addAction(start_cookie_action)
-
-        # Obtain Steam Cookie Action
-        cookie_action = QAction(TEXTS.get("tray_get_cookie", "Obtain Steam cookie"), self.menu)
-        cookie_action.triggered.connect(self.obtain_cookie)
-        self.menu.addAction(cookie_action)
-
+ 
+        # 4. Obtener cookie de Steam al abrir (Only on Windows)
+        if IS_WINDOWS:
+            start_cookie_action = QAction(TEXTS.get("config_get_cookie", "Obtener cookie al iniciar la aplicación"), self.menu, checkable=True)
+            start_cookie_action.setChecked(self.config_manager.get_setting("get_cookie_on_launch", True))
+            start_cookie_action.triggered.connect(lambda chk: self.config_manager.set_setting("get_cookie_on_launch", chk))
+            startup_menu.addAction(start_cookie_action)
+ 
+            # Obtain Steam Cookie Action (Only on Windows)
+            cookie_action = QAction(TEXTS.get("tray_get_cookie", "Obtain Steam cookie"), self.menu)
+            cookie_action.triggered.connect(self.obtain_cookie)
+            self.menu.addAction(cookie_action)
+ 
         self.menu.addSeparator()
 
         # Block 3: Support & System
