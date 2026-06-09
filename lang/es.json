@@ -120,5 +120,19 @@
     "tray_open_discord": "Abrir Discord",
     "tray_startup_options": "Preferencias de inicio",
     "tray_diagnostic_tools": "Herramientas de diagnóstico",
-    "discord_not_found_msg": "Discord no se encuentra en la ruta por defecto."
+    "discord_not_found_msg": "Discord no se encuentra en la ruta por defecto.",
+    "cookie_manual_title": "Introducción Manual de Cookie",
+    "cookie_manual_prompt": "No se pudo obtener la cookie de Steam automáticamente.\n\n¿Deseas introducir el valor de 'steamLoginSecure' de forma manual?",
+    "cookie_manual_label": "Pega el valor de tu cookie 'steamLoginSecure' aquí:",
+    "cookie_invalid_msg": "La cookie introducida es inválida o ha expirado. Por favor, compruébala e inténtalo de nuevo.",
+    "cookie_err_not_found": "No se encontraron perfiles de cookies de Steam en ningún navegador local.",
+    "cookie_err_expired": "Se encontraron cookies de Steam en tus perfiles, pero todas han expirado o son inválidas.",
+    "cookie_err_headless": "El proceso automático de fondo falló o no pudo acceder al perfil del navegador.",
+    "cookie_err_cancelled": "Cancelado por el usuario o autenticación incompleta.",
+    "dont_show_again": "No mostrar de nuevo",
+    "always_close": "Cerrar siempre",
+    "copied": "¡Copiado!",
+    "config_show_lobby": "Mostrar GeForce NOW cuando no hay juego activo",
+    "lobby_status": "En el menú principal",
+    "play_on_gfn": "Jugar en GeForce NOW"
 }

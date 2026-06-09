@@ -205,8 +205,8 @@
         "client_id": "356877880938070016",
         "custom_details": "",
         "custom_state": "",
-        "custom_party_size_current": 1,
-        "custom_party_size_max": 2
+        "custom_party_size_current": 0,
+        "custom_party_size_max": 0
     },
     "Heroes of the Storm": {
         "name": "Heroes of the Storm",
@@ -45814,7 +45814,11 @@
         "client_id": "1161772927566495865",
         "executable_path": "win64/ittakestwo.exe",
         "cmsId": "102269111",
-        "uuid": "a8bb6644-1194-4109-83b2-7b1fdf390bd2"
+        "uuid": "a8bb6644-1194-4109-83b2-7b1fdf390bd2",
+        "custom_details": "",
+        "custom_state": "",
+        "custom_party_size_current": 0,
+        "custom_party_size_max": 2
     },
     "The Isle": {
         "name": "The Isle",

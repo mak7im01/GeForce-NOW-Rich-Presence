@@ -120,5 +120,19 @@
     "tray_open_discord": "Open Discord",
     "tray_startup_options": "Startup preferences",
     "tray_diagnostic_tools": "Diagnostic tools",
-    "discord_not_found_msg": "Discord not found at the default location."
+    "discord_not_found_msg": "Discord not found at the default location.",
+    "cookie_manual_title": "Manual Cookie Entry",
+    "cookie_manual_prompt": "Automated cookie retrieval did not succeed.\n\nDo you want to enter the 'steamLoginSecure' cookie manually?",
+    "cookie_manual_label": "Paste your 'steamLoginSecure' cookie value here:",
+    "cookie_invalid_msg": "The cookie entered is invalid or expired. Please check it and try again.",
+    "cookie_err_not_found": "No Steam cookie profiles were found in any local browser.",
+    "cookie_err_expired": "Steam cookies were found in your profiles, but all of them have expired or are invalid.",
+    "cookie_err_headless": "Headless background auto-retrieval failed or could not access the browser profile.",
+    "cookie_err_cancelled": "Cancelled by user or authentication incomplete.",
+    "dont_show_again": "Don't show again",
+    "always_close": "Always close",
+    "copied": "Copied!",
+    "config_show_lobby": "Show GeForce NOW when no game is active",
+    "lobby_status": "In the main menu",
+    "play_on_gfn": "Play on GeForce NOW"
 }

@@ -51,8 +51,9 @@ class PresenceManager(QObject):
     gfn_error_detected = pyqtSignal()
     
     def __init__(self, client_id: str, games_map: dict, cookie_manager: CookieManager, test_rich_url: str, texts: Dict,
-                 update_interval: int = 10, keep_alive: bool = False):
+                 config_manager=None, update_interval: int = 10, keep_alive: bool = False):
         super().__init__()
+        self.config_manager = config_manager
         # en __init__
         self._match_cache_lock = threading.Lock()
         self._apps_lock = threading.Lock()
@@ -340,56 +341,65 @@ class PresenceManager(QObject):
         self.close()
 
     def _connect_rpc(self, client_id: Optional[str] = None):
-        if client_id != "1095416975028650046":
-            if self._is_connecting:
-                logger.debug("Ya hay un intento de conexión en progreso a Discord RPC, saltando intento concurrente.")
+        client_id = client_id or self.client_id
+        
+        # Check if we should ignore the default lobby client ID
+        if client_id == "1095416975028650046":
+            show_lobby = True
+            if self.config_manager:
+                show_lobby = self.config_manager.get_setting("show_lobby_status", True)
+            if not show_lobby:
+                logger.debug("Saltando conexión a client_id del Lobby (show_lobby_status deshabilitado).")
                 return
-            
-            self._is_connecting = True
-            
-            def perform_connect():
-                nonlocal client_id
-                try:
-                    if self.rpc:
-                        try:
-                            self.rpc.close()
-                        except Exception:
-                            pass
-                    client_id = client_id or self.client_id
-                    self.rpc = Presence(client_id)
-                    
-                    # Intentar conectar cada 2 segundos por un máximo de 10 segundos (5 intentos)
-                    max_retries = 5
-                    retry_delay = 2.0
-                    
-                    for attempt in range(max_retries):
-                        try:
-                            self.rpc.connect()
-                            self._connected_client_id = client_id
-                            logger.info(f"✅ Conectado a Discord RPC con client_id={client_id}")
-                            return
-                        except Exception as e:
-                            err_str = str(e)
-                            is_discord_not_running = "Could not find Discord" in err_str or "Discord installed and running" in err_str
-                            
-                            if is_discord_not_running and attempt < max_retries - 1:
-                                logger.info(f"⏳ Discord no parece estar listo aún. Reintentando conexión en {retry_delay}s... (Intento {attempt+1}/{max_retries})")
-                                time.sleep(retry_delay)
-                            else:
-                                raise e
-                except Exception as e:
-                    err_str = str(e)
-                    if "Could not find Discord" in err_str or "Discord installed and running" in err_str:
-                        logger.error(f"💨 No se pudo conectar a Discord RPC tras varios intentos. Relanzando Discord...")
-                        AppLauncher.launch_discord()
-                    else:
-                        logger.error(f"❌ Error conectando a Discord RPC: {e}")
-                    self.rpc = None
-                    self._connected_client_id = None
-                finally:
-                    self._is_connecting = False
 
-            threading.Thread(target=perform_connect, daemon=True).start()
+        if self._is_connecting:
+            logger.debug("Ya hay un intento de conexión en progreso a Discord RPC, saltando intento concurrente.")
+            return
+        
+        self._is_connecting = True
+        
+        def perform_connect():
+            nonlocal client_id
+            try:
+                if self.rpc:
+                    try:
+                        self.rpc.close()
+                    except Exception:
+                        pass
+                self.rpc = Presence(client_id)
+                
+                # Intentar conectar cada 2 segundos por un máximo de 10 segundos (5 intentos)
+                max_retries = 5
+                retry_delay = 2.0
+                
+                for attempt in range(max_retries):
+                    try:
+                        self.rpc.connect()
+                        self._connected_client_id = client_id
+                        logger.info(f"✅ Conectado a Discord RPC con client_id={client_id}")
+                        return
+                    except Exception as e:
+                        err_str = str(e)
+                        is_discord_not_running = "Could not find Discord" in err_str or "Discord installed and running" in err_str
+                        
+                        if is_discord_not_running and attempt < max_retries - 1:
+                            logger.info(f"⏳ Discord no parece estar listo aún. Reintentando conexión en {retry_delay}s... (Intento {attempt+1}/{max_retries})")
+                            time.sleep(retry_delay)
+                        else:
+                            raise e
+            except Exception as e:
+                err_str = str(e)
+                if "Could not find Discord" in err_str or "Discord installed and running" in err_str:
+                    logger.error(f"💨 No se pudo conectar a Discord RPC tras varios intentos. Relanzando Discord...")
+                    AppLauncher.launch_discord()
+                else:
+                    logger.error(f"❌ Error conectando a Discord RPC: {e}")
+                self.rpc = None
+                self._connected_client_id = None
+            finally:
+                self._is_connecting = False
+
+        threading.Thread(target=perform_connect, daemon=True).start()
 
     def stop_force_game(self):
         """Detiene el forzado de juego y vuelve a la detección automática"""
@@ -1411,8 +1421,10 @@ class PresenceManager(QObject):
                     if name == "geforcenow.exe":
                         return True
                 elif IS_MACOS:
-                    # Verify exact process name on macOS (can be GeForceNOW or GeForce NOW)
                     if name in ("geforcenow", "geforce now"):
+                        return True
+                else:
+                    if "geforcenow" in name:
                         return True
         except Exception as e:
             logger.debug(f"Error comprobando procesos: {e}")
@@ -1477,14 +1489,26 @@ class PresenceManager(QObject):
                 self.current_game_start_time = int(time.time())
 
         if not current_game:
-            if self.last_game is not None:
-                try:
-                    if self.rpc: self.rpc.clear()
-                except Exception:
-                    pass
-                self.last_game = None
-                self.current_game_start_time = None
-            return
+            show_lobby = True
+            if self.config_manager:
+                show_lobby = self.config_manager.get_setting("show_lobby_status", True)
+            
+            if self.is_geforce_running() and show_lobby:
+                current_game = {
+                    "name": "GeForce NOW",
+                    "client_id": "1095416975028650046",
+                    "image": "geforce",
+                    "custom_details": self.texts.get("lobby_status", "En el menú principal")
+                }
+            else:
+                if self.last_game is not None:
+                    try:
+                        if self.rpc: self.rpc.clear()
+                    except Exception:
+                        pass
+                    self.last_game = None
+                    self.current_game_start_time = None
+                return
 
         client_id = current_game.get("client_id") or self.client_id
         
@@ -1520,24 +1544,17 @@ class PresenceManager(QObject):
                 else:
                     self.log_once(f"🔁 Reconectado client_id {client_id}")
 
-        def split_status(s):
-            for sep in ["|", " - ", ":", "›", ">"]:
-                if sep in s:
-                    a, b = s.split(sep, 1)
-                    return a.strip(), b.strip()
-            return s.strip(), None
-
         # Determine Max Size settings first to decide how to format text
         max_size_setting = current_game.get("max_party_size")
         
-        # Default behavior: Split status
-        details, state = (split_status(status) if status else (None, None))
+        # Default behavior: Put the full presence status in details
+        details = status
+        state = None
         party_size_data = None
 
         if max_size_setting:
             try:
                 max_size = int(max_size_setting)
-                # If custom party size is active, we avoid splitting to prevent "Status (1 of 4)" weirdness
                 # We put the full status in details
                 details = status
                 
@@ -1581,11 +1598,12 @@ class PresenceManager(QObject):
         has_real_details = (details is not None and len(details.strip()) > 0)
         has_real_state = (state is not None and len(state.strip()) > 0)
         
-        # If no real detals, check custom
+        # If no real details, check custom
         if not has_real_details and custom_details is not None and len(str(custom_details).strip()) > 0:
             details = str(custom_details)
         
         # If no real state, check custom
+        if not has_real_state and custom_state is not None and len(str(custom_state).strip()) > 0:
             state = str(custom_state)
             
         # Party Size Logic:
@@ -1613,7 +1631,11 @@ class PresenceManager(QObject):
 
         # Restore ignore check
         rn = (current_game.get('name') or '').strip().lower()
-        if rn in ["geforce now", "games", ""]:
+        show_lobby = True
+        if self.config_manager:
+            show_lobby = self.config_manager.get_setting("show_lobby_status", True)
+
+        if rn in ["games", ""] or (rn == "geforce now" and not show_lobby):
             try:
                 if self.rpc: self.rpc.clear()
             except:
@@ -1627,7 +1649,10 @@ class PresenceManager(QObject):
             "large_image": current_game.get('image', 'steam'),
             "large_text": current_game.get('name'),
             "small_image": current_game.get("icon_key") if current_game.get("icon_key") else None,
-            "start": self.current_game_start_time
+            "start": self.current_game_start_time,
+            "buttons": [
+                {"label": self.texts.get("play_on_gfn", "Jugar en GeForce NOW"), "url": "https://geforcenow.digevo.com/"}
+            ]
         }
         
         if party_size_data:

@@ -133,7 +133,7 @@ GAMING_STYLESHEET = """
 """
 
 class GamingMessageBox(QDialog):
-    def __init__(self, title, text, icon_type="info", parent=None):
+    def __init__(self, title, text, icon_type="info", checkbox_text=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setWindowIcon(QIcon(str(ASSETS_DIR / "geforce.ico")))
@@ -145,12 +145,37 @@ class GamingMessageBox(QDialog):
         layout.setContentsMargins(25, 25, 25, 20)
         layout.setSpacing(20)
         
-        # Icon & Text Row (Optional: add an icon label if desired, skipping for simplicity to match style)
+        # Icon & Text Row
         self.lbl_text = QLabel(text)
         self.lbl_text.setWordWrap(True)
         self.lbl_text.setAlignment(Qt.AlignCenter)
         self.lbl_text.setStyleSheet("font-size: 15px;")
         layout.addWidget(self.lbl_text)
+        
+        # Checkbox
+        self.checkbox = None
+        if checkbox_text:
+            from PyQt5.QtWidgets import QCheckBox
+            self.checkbox = QCheckBox(checkbox_text)
+            self.checkbox.setStyleSheet("""
+                QCheckBox {
+                    color: #cfcfcf;
+                    font-size: 13px;
+                    font-family: "Segoe UI";
+                }
+                QCheckBox::indicator {
+                    width: 16px;
+                    height: 16px;
+                    background-color: #1a1b1d;
+                    border: 1px solid #2c2f33;
+                    border-radius: 3px;
+                }
+                QCheckBox::indicator:checked {
+                    background-color: #045D0E;
+                    border: 1px solid #12881F;
+                }
+            """)
+            layout.addWidget(self.checkbox, 0, Qt.AlignCenter)
         
         # Buttons
         btn_layout = QHBoxLayout()
@@ -181,18 +206,21 @@ class GamingMessageBox(QDialog):
 
     @staticmethod
     def show_info(parent, title, text):
-        dlg = GamingMessageBox(title, text, "info", parent)
+        dlg = GamingMessageBox(title, text, "info", None, parent)
         dlg.exec_()
         
     @staticmethod
     def show_warning(parent, title, text):
-        dlg = GamingMessageBox(title, text, "warning", parent)
+        dlg = GamingMessageBox(title, text, "warning", None, parent)
         dlg.exec_()
 
     @staticmethod
-    def show_question(parent, title, text):
-        dlg = GamingMessageBox(title, text, "question", parent)
-        return dlg.exec_() == QDialog.Accepted
+    def show_question(parent, title, text, checkbox_text=None):
+        dlg = GamingMessageBox(title, text, "question", checkbox_text, parent)
+        res = dlg.exec_() == QDialog.Accepted
+        if checkbox_text:
+            return res, dlg.checkbox.isChecked()
+        return res
 
 class GamingInputDialog(QDialog):
     def __init__(self, title, label_text, value=0, min_val=0, max_val=100, step=1, parent=None):
@@ -238,6 +266,48 @@ class GamingInputDialog(QDialog):
         if dlg.exec_() == QDialog.Accepted:
             return dlg.spin.value(), True
         return value, False
+
+
+class GamingTextInputDialog(QDialog):
+    def __init__(self, title, label_text, default_value="", parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setWindowIcon(QIcon(str(ASSETS_DIR / "geforce.ico")))
+        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
+        self.setStyleSheet(GAMING_STYLESHEET)
+        
+        layout = QVBoxLayout()
+        layout.setContentsMargins(25, 25, 25, 20)
+        layout.setSpacing(15)
+        
+        lbl = QLabel(label_text)
+        lbl.setAlignment(Qt.AlignCenter)
+        layout.addWidget(lbl)
+        
+        self.entry = QLineEdit()
+        self.entry.setText(default_value)
+        layout.addWidget(self.entry)
+        
+        btn_layout = QHBoxLayout()
+        self.ok_btn = QPushButton("OK")
+        self.ok_btn.clicked.connect(self.accept)
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setObjectName("secondary")
+        self.cancel_btn.clicked.connect(self.reject)
+        
+        btn_layout.addWidget(self.ok_btn)
+        btn_layout.addWidget(self.cancel_btn)
+        layout.addLayout(btn_layout)
+        
+        self.setLayout(layout)
+        self.setFixedSize(350, 180)
+
+    @staticmethod
+    def get_text(parent, title, label, default_value=""):
+        dlg = GamingTextInputDialog(title, label, default_value, parent)
+        if dlg.exec_() == QDialog.Accepted:
+            return dlg.entry.text().strip(), True
+        return default_value, False
 
 
 from PyQt5.QtCore import pyqtSignal
@@ -723,22 +793,32 @@ class CustomPresenceDialog(QDialog):
         }
         self.accept()
 
+
 class ClickableIconLabel(QLabel):
-    def __init__(self, icon_path, url, parent=None):
+    def __init__(self, icon_path, url, is_copy=False, parent=None):
         super().__init__(parent)
         self.url = url
+        self.is_copy = is_copy
+        self.setFixedSize(48, 48)
+        self.setStyleSheet("padding: 0px; margin: 0px; background: transparent; border: none;")
         from PyQt5.QtGui import QPixmap
         pixmap = QPixmap(str(ASSETS_DIR / icon_path))
         if not pixmap.isNull():
-            # Apply some smoothing if it's scaled down
             self.setPixmap(pixmap.scaled(48, 48, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         self.setCursor(Qt.PointingHandCursor)
-        self.setToolTip(url)
+        self.setToolTip(url if not is_copy else f"Discord: {url}")
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
-            import webbrowser
-            webbrowser.open(self.url)
+            if self.is_copy:
+                from PyQt5.QtWidgets import QApplication, QToolTip
+                from PyQt5.QtGui import QCursor
+                QApplication.clipboard().setText(self.url)
+                QToolTip.showText(QCursor.pos(), TEXTS.get("copied", "¡Copiado!"))
+            else:
+                import webbrowser
+                webbrowser.open(self.url)
+
 
 class AboutDialog(QDialog):
     def __init__(self, parent=None):
@@ -774,9 +854,9 @@ class AboutDialog(QDialog):
         icons_layout.setSpacing(30)
         icons_layout.setAlignment(Qt.AlignCenter)
         
-        github_icon = ClickableIconLabel("github.png", "https://github.com/KarmaDevz/GeForce-NOW-Rich-Presence", self)
-        discord_icon = ClickableIconLabel("discord.png", "https://discord.com/users/karmadevz", self)
-        paypal_icon = ClickableIconLabel("paypal.png", "https://www.paypal.com/paypalme/KarmaDevz", self)
+        github_icon = ClickableIconLabel("github.png", "https://github.com/KarmaDevz/GeForce-NOW-Rich-Presence", False, self)
+        discord_icon = ClickableIconLabel("discord.png", "karmadevz", True, self)
+        paypal_icon = ClickableIconLabel("paypal.png", "https://www.paypal.com/paypalme/KarmaDevz", False, self)
         
         icons_layout.addWidget(github_icon)
         icons_layout.addWidget(discord_icon)

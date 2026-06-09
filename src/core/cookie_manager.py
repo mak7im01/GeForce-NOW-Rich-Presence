@@ -4,7 +4,7 @@ import logging
 import requests
 import psutil
 from pathlib import Path
-from typing import Optional, Callable, Dict
+from typing import Optional, Callable, Dict, Tuple
 
 try:
     import browser_cookie3
@@ -21,10 +21,11 @@ from src.core.utils import save_cookie_to_env, DRIVER_PATH, ensure_driver_execut
 logger = logging.getLogger('geforce_presence')
 
 class CookieManager:
-    def __init__(self, texts: Dict, env_cookie: Optional[str] = None, test_url: str = ""):
+    def __init__(self, texts: Dict, env_cookie: Optional[str] = None, test_url: str = "", config_manager=None):
         self.texts = texts
         self.env_cookie = env_cookie
         self.test_url = test_url
+        self.config_manager = config_manager
         self.driver_path = str(ensure_driver_executable(DRIVER_PATH))
 
     def validar_cookie(self, cookie_value: str) -> bool:
@@ -38,108 +39,166 @@ class CookieManager:
             logger.debug(f"Error validando cookie: {e}")
         return False
 
-    def get_cookie_from_edge_profile(self) -> Optional[str]:
+    def get_cookie_from_browser_profiles(self) -> Tuple[Optional[str], Optional[str], bool]:
+        """
+        Recopila todas las cookies de Steam de los perfiles locales y luego las valida.
+        Retorna (cookie_value, browser_name, has_expired_candidates).
+        """
         if not browser_cookie3:
             logger.warning("browser_cookie3 no instalado.")
-            return None
+            return None, None, False
             
-        try:
-            logger.info("🧩 Intentando leer cookie de Steam desde Edge (browser_cookie3)...")
-            cj = browser_cookie3.edge(domain_name='steamcommunity.com')
-            for cookie in cj:
-                if cookie.name == 'steamLoginSecure':
-                    logger.info("✅ Cookie automática obtenida desde Edge (browser_cookie3).")
-                    return cookie.value
-            logger.info("⚠️ No se encontró cookie steamLoginSecure en perfiles accesibles por browser_cookie3.")
-        except Exception as e:
-            logger.debug(f"browser_cookie3 fallo: {e}")
-        return None
+        logger.info("🧩 Intentando recopilar cookies de Steam desde perfiles de navegadores locales...")
+        candidates = []
+        
+        browsers_to_try = []
+        for name in ['edge', 'chrome', 'firefox', 'brave', 'opera', 'vivaldi']:
+            fn = getattr(browser_cookie3, name, None)
+            if fn:
+                browsers_to_try.append((name.capitalize(), fn))
+                
+        # 1. Recopilar candidatos de forma segura e independiente por navegador
+        for b_name, get_cookies_fn in browsers_to_try:
+            try:
+                logger.debug(f"Buscando cookies de Steam en {b_name}...")
+                cj = get_cookies_fn(domain_name='steamcommunity.com')
+                found_in_browser = False
+                for cookie in cj:
+                    if cookie.name == 'steamLoginSecure' and cookie.value:
+                        candidates.append((cookie.value, b_name))
+                        found_in_browser = True
+                if found_in_browser:
+                    logger.debug(f"Candidato encontrado en {b_name}.")
+            except Exception as e:
+                logger.debug(f"Extracción de cookies falló para {b_name}: {e}")
+                
+        # 2. Validar candidatos recopilados
+        has_expired = False
+        for cookie_val, b_name in candidates:
+            logger.info(f"Validando cookie candidata de {b_name}...")
+            if self.validar_cookie(cookie_val):
+                logger.info(f"✅ Cookie válida obtenida desde {b_name}.")
+                return cookie_val, b_name, has_expired
+            else:
+                logger.info(f"❌ Cookie de {b_name} expirada o inválida.")
+                has_expired = True
+                
+        logger.info("⚠️ No se encontraron cookies válidas en los perfiles locales.")
+        return None, None, has_expired
     
-    def close_edge_processes(self):
-        """Cierra todos los procesos de Microsoft Edge."""
+    def close_browser_processes(self, browser: str = "edge"):
+        """Cierra todos los procesos del navegador especificado."""
+        proc_name = "msedge.exe" if browser.lower() == "edge" else "chrome.exe"
         closed = 0
         for proc in psutil.process_iter(['pid', 'name']):
             try:
-                if proc.info['name'] and "msedge.exe" in proc.info['name'].lower():
+                if proc.info['name'] and proc_name in proc.info['name'].lower():
                     proc.terminate()
                     closed += 1
             except Exception:
                 continue
         if closed:
-            logger.info(f"🔒 {closed} procesos de Edge terminados.")
+            logger.info(f"🔒 {closed} procesos de {browser} terminados.")
         else:
-            logger.debug("No había procesos de Edge en ejecución.")
+            logger.debug(f"No había procesos de {browser} en ejecución.")
 
     def get_cookie_with_selenium(self, 
+                                 browser: str = "edge",
                                  headless: bool = False, 
                                  profile_dir: str = "Default", 
                                  confirm_callback: Optional[Callable[[str, str], bool]] = None,
                                  _is_retry: bool = False) -> Optional[str]:
         try:
-            # Check if Edge is running
-            edge_running = any(
-                (p.info['name'] and "msedge.exe" in p.info['name'].lower())
+            # Check if browser is running
+            proc_name = "msedge.exe" if browser.lower() == "edge" else "chrome.exe"
+            browser_running = any(
+                (p.info['name'] and proc_name in p.info['name'].lower())
                 for p in psutil.process_iter(['name'])
             )
 
-            if edge_running:
+            if browser_running:
                 if confirm_callback:
+                    browser_display = "Microsoft Edge" if browser.lower() == "edge" else "Google Chrome"
                     res = confirm_callback(
-                        self.texts.get("edge_open", "Microsoft Edge está abierto"), 
-                        self.texts.get('edge_open_confirm', 'Edge needs to be closed to proceed. Close it?')
+                        self.texts.get("edge_open", f"{browser_display} está abierto"), 
+                        self.texts.get('edge_open_confirm', f"{browser_display} needs to be closed to proceed. Close it?")
                     )
                     if not res:
-                        logger.info("⏭️ Usuario canceló la obtención de cookie porque Edge estaba abierto.")
+                        logger.info(f"⏭️ Usuario canceló la obtención de cookie porque {browser_display} estaba abierto.")
                         return None
                 else:
-                    logger.info("Edge is running and no callback provided to confirm close.")
+                    logger.info(f"{browser} is running and no callback provided to confirm close.")
                     return None
 
-                self.close_edge_processes()
+                self.close_browser_processes(browser)
                 time.sleep(2)
 
-            logger.info("🧩 Obteniendo cookie de Steam con Selenium (Edge)...")
+            logger.info(f"🧩 Obteniendo cookie de Steam con Selenium ({browser}, headless={headless})...")
             
             user_data_dir = ""
             if IS_WINDOWS:
                 localapp = os.getenv("LOCALAPPDATA", "")
-                user_data_dir = str(Path(localapp) / "Microsoft" / "Edge" / "User Data")
+                if browser.lower() == "edge":
+                    user_data_dir = str(Path(localapp) / "Microsoft" / "Edge" / "User Data")
+                else:
+                    user_data_dir = str(Path(localapp) / "Google" / "Chrome" / "User Data")
             elif IS_MACOS:
-                user_data_dir = str(Path.home() / "Library" / "Application Support" / "Microsoft Edge")
+                if browser.lower() == "edge":
+                    user_data_dir = str(Path.home() / "Library" / "Application Support" / "Microsoft Edge")
+                else:
+                    user_data_dir = str(Path.home() / "Library" / "Application Support" / "Google" / "Chrome")
             elif IS_LINUX:
-                user_data_dir = str(Path.home() / ".config" / "microsoft-edge")
+                if browser.lower() == "edge":
+                    user_data_dir = str(Path.home() / ".config" / "microsoft-edge")
+                else:
+                    user_data_dir = str(Path.home() / ".config" / "google-chrome")
 
             if not user_data_dir or not Path(user_data_dir).exists():
-                logger.error(f"❌ No se encontró la carpeta de perfiles de Edge en: {user_data_dir}")
-                # Try to proceed anyway? Selenium might create a temp one if not found, but we want the specific profile.
-                if not Path(user_data_dir).exists():
-                     pass # Logged above, but let's see if we can continue or return
-                # return None # Returning None might be safer if we strictly need the user's cookies.
+                logger.error(f"❌ No se encontró la carpeta de perfiles de {browser} en: {user_data_dir}")
 
-            service = EdgeService(executable_path=self.driver_path)
-            options = Options()
-            options.add_argument(f"--user-data-dir={user_data_dir}")
-            options.add_argument(f"--profile-directory={profile_dir}")
-            
-            # Anti-crash flags
-            options.add_argument("--no-sandbox")
-            options.add_argument("--disable-dev-shm-usage")
-            options.add_argument("--disable-gpu")
-            
-            if headless:
-                options.add_argument("--headless=new")
+            if browser.lower() == "edge":
+                service = EdgeService(executable_path=self.driver_path)
+                options = Options()
+                options.add_argument(f"--user-data-dir={user_data_dir}")
+                options.add_argument(f"--profile-directory={profile_dir}")
+                options.add_argument("--no-sandbox")
+                options.add_argument("--disable-dev-shm-usage")
+                options.add_argument("--disable-gpu")
+                if headless:
+                    options.add_argument("--headless=new")
+                driver = webdriver.Edge(service=service, options=options)
+            else:
+                from selenium.webdriver.chrome.options import Options as ChromeOptions
+                options = ChromeOptions()
+                options.add_argument(f"--user-data-dir={user_data_dir}")
+                options.add_argument(f"--profile-directory={profile_dir}")
+                options.add_argument("--no-sandbox")
+                options.add_argument("--disable-dev-shm-usage")
+                options.add_argument("--disable-gpu")
+                if headless:
+                    options.add_argument("--headless=new")
+                driver = webdriver.Chrome(options=options)
 
-            driver = webdriver.Edge(service=service, options=options)
             try:
                 driver.get("https://steamcommunity.com")
-                cookies = driver.get_cookies()
-                for c in cookies:
-                    if c.get('name') == 'steamLoginSecure':
-                        val = c.get('value')
-                        save_cookie_to_env(val, ENV_PATH)
-                        logger.debug(f"Cookie obtenida parcial: {val[:20]}... (longitud: {len(val)})")
-                        logger.info("✅ Cookie obtenida con Selenium.")
-                        return val
+                
+                # Polling loop para esperar que se registre la cookie (hasta 15 segundos)
+                cookie_val = None
+                for _ in range(15):
+                    cookies = driver.get_cookies()
+                    for c in cookies:
+                        if c.get('name') == 'steamLoginSecure':
+                            cookie_val = c.get('value')
+                            break
+                    if cookie_val:
+                        break
+                    time.sleep(1)
+
+                if cookie_val:
+                    save_cookie_to_env(cookie_val, ENV_PATH)
+                    logger.debug(f"Cookie obtenida parcial: {cookie_val[:20]}... (longitud: {len(cookie_val)})")
+                    logger.info(f"✅ Cookie obtenida con Selenium ({browser}).")
+                    return cookie_val
                 logger.warning("⚠️ No se encontró 'steamLoginSecure' en la sesión de Steam.")
             finally:
                 driver.quit()
@@ -148,89 +207,103 @@ class CookieManager:
             msg = getattr(e, "msg", str(e))
             logger.error(f"❌ Selenium WebDriver error: {msg}")
 
-            # Detecta exactamente el error de versión
-            if "only supports Microsoft Edge version" in msg or "Unable to obtain driver for MicrosoftEdge" in msg:
+            if browser.lower() == "edge" and ("only supports Microsoft Edge version" in msg or "Unable to obtain driver for MicrosoftEdge" in msg):
                 if _is_retry:
-                    logger.error("❌ Ya se intentó actualizar el WebDriver y falló. Abortando para evitar bucle infinito.")
+                    logger.error("❌ Ya se intentó actualizar el WebDriver y falló. Abortando.")
                     return None
 
                 logger.warning("🔄 Edge WebDriver desactualizado. Intentando actualizar...")
-
                 try:
                     from src.core.edge_updater import EdgeDriverUpdater
                     driver_updater = EdgeDriverUpdater(parent_widget=None)
                     driver_updater.update()
                     
-                    # Refrescar la ruta del driver copiada en los temporales
                     self.driver_path = str(ensure_driver_executable(DRIVER_PATH))
-                    logger.info("🆗 WebDriver actualizado correctamente. Reintentando Selenium...")
-
-                    # Reintentar UNA sola vez
+                    logger.info("🆗 WebDriver actualizado. Reintentando...")
                     return self.get_cookie_with_selenium(
+                        browser=browser,
                         headless=headless,
                         profile_dir=profile_dir,
                         confirm_callback=confirm_callback,
                         _is_retry=True
                     )
-
                 except Exception as update_error:
                     logger.error(f"❌ Error actualizando Edge WebDriver: {update_error}")
-
             else:
                 logger.error("⚠️ Error de Selenium no relacionado con el driver desactualizado.")
         except Exception as e:
             logger.error(f"⚠️ Error inesperado obteniendo cookie con Selenium: {e}")
-            return None
+        return None
 
     def get_steam_cookie(self, confirm_callback: Optional[Callable[[str, str], bool]] = None) -> Optional[str]:
         if self.env_cookie:
             logger.info("🧩 Validando cookie desde .env...")
             if self.validar_cookie(self.env_cookie):
-                logger.info("✅ Cookie del .env válida.")
+                logger.info("✅ Cookie del .env válida (Origen: .env).")
                 return self.env_cookie
             else:
                 logger.warning("⚠️ Cookie del .env expirada o inválida.")
 
-        c = self.get_cookie_from_edge_profile()
-        if c and self.validar_cookie(c):
+        c, browser_name, has_expired = self.get_cookie_from_browser_profiles()
+        if c:
             return c
 
-        # If we are here, we need to ask user permission to use Selenium if not headless/silent
         if confirm_callback:
              if not confirm_callback("Cookie", self.texts.get('ask_cookie', 'Obtain cookie via Edge?')):
                  return None
 
-        c2 = self.get_cookie_with_selenium(headless=False, confirm_callback=confirm_callback)
-        if c2 and self.validar_cookie(c2):
-            return c2
+             # Intentar Selenium en modo oculto (headless) primero
+             c2 = self.get_cookie_with_selenium(browser="edge", headless=True, confirm_callback=confirm_callback)
+             if c2 and self.validar_cookie(c2):
+                 return c2
+
+             # Fallback a Selenium modo visual
+             c2 = self.get_cookie_with_selenium(browser="edge", headless=False, confirm_callback=confirm_callback)
+             if c2 and self.validar_cookie(c2):
+                 return c2
 
         logger.error("❌ No se pudo obtener cookie de Steam automáticamente.")
         return None
 
-    def ask_and_obtain_cookie(self, confirm_callback: Callable[[str, str], bool]) -> Optional[str]:
-        """Versión interactiva"""
+    def ask_and_obtain_cookie(self, confirm_callback: Callable[[str, str], bool]) -> Tuple[Optional[str], str]:
+        """
+        Versión interactiva para la interfaz de usuario.
+        Retorna una tupla (cookie_value, status_key).
+        """
         try:
             should = confirm_callback("Cookie", 
                                 self.texts.get('ask_cookie', 'The program will try to obtain your Steam cookie using Microsoft Edge. Make sure you are logged in to Steam in Edge.\n\nDo you want to continue?'))
 
             if not should:
                 logger.info("No se obtuvo cookie de Steam de forma interactiva.")
-                return None
+                return None, "cookie_err_cancelled"
 
-            c2 = self.get_cookie_with_selenium(headless=False, confirm_callback=confirm_callback)
+            # 1. Intentar leer de perfiles locales (rápido y no invasivo)
+            c, browser_name, has_expired = self.get_cookie_from_browser_profiles()
+            if c:
+                save_cookie_to_env(c, ENV_PATH)
+                logger.info(f"Cookie guardada en .env desde perfiles (Origen: {browser_name})")
+                return c, "cookie_saved"
+
+            # 2. Intentar Selenium Headless (oculto)
+            logger.info("Intentando obtener cookie con Selenium en modo oculto (headless)...")
+            c2 = self.get_cookie_with_selenium(browser="edge", headless=True, confirm_callback=confirm_callback)
             if c2 and self.validar_cookie(c2):
-                # save_cookie_to_env is called inside get_cookie_with_selenium if successful? 
-                # Actually I put it there.
-                return c2
-            
-            c = self.get_cookie_from_edge_profile()
-            if c and self.validar_cookie(c):
-                # save_cookie_to_env(c) # Should save if found
-                return c
+                logger.info("Cookie guardada en .env desde Selenium Headless")
+                return c2, "cookie_saved"
 
-            logger.warning("No se pudo obtener cookie automáticamente tras solicitud del usuario.")
-            return None
+            # 3. Intentar Selenium Visual
+            logger.info("Modo oculto falló. Intentando con Selenium en modo visual...")
+            c2 = self.get_cookie_with_selenium(browser="edge", headless=False, confirm_callback=confirm_callback)
+            if c2 and self.validar_cookie(c2):
+                logger.info("Cookie guardada en .env desde Selenium Visual")
+                return c2, "cookie_saved"
+
+            if has_expired:
+                return None, "cookie_err_expired"
+            else:
+                return None, "cookie_err_not_found"
             
         except Exception as e:
             logger.error(f"Error en ask_and_obtain_cookie: {e}")
-            return None
+            return None, "cookie_err_headless"

@@ -218,7 +218,7 @@ def main():
     steam_cookie_env = os.getenv("STEAM_COOKIE", "").strip() or None
     update_interval = int(os.getenv("UPDATE_INTERVAL", "10"))
 
-    cookie_manager = CookieManager(texts, steam_cookie_env, test_rich_url)
+    cookie_manager = CookieManager(texts, steam_cookie_env, test_rich_url, config_manager=config_manager)
     
     presence_manager = PresenceManager(
         client_id=client_id,
@@ -226,6 +226,7 @@ def main():
         cookie_manager=cookie_manager,
         test_rich_url=test_rich_url,
         texts=texts,
+        config_manager=config_manager,
         update_interval=update_interval
     )
 
