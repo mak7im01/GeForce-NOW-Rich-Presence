@@ -72,7 +72,7 @@ def show_crash_dialog_slot(tb_text):
     finally:
         logger.info("Performing clean shutdown after unhandled crash...")
         
-        # Cleanup presence_manager if initialized
+        # Cleanup presence_manager if initialized (Important for closing the application and the fake games)
         global main_presence_manager
         if main_presence_manager:
             try:
@@ -81,16 +81,18 @@ def show_crash_dialog_slot(tb_text):
             except Exception as e:
                 logger.error(f"Error stopping presence manager during shutdown: {e}")
                 
-        # Release single instance lock
+        # Release single instance lock (this is for running just one instance)
         try:
             from src.core.utils import release_lock
             release_lock()
-        except Exception:
+        except Exception as e:
+            logger.error(f"Error creando lock: {e}")
             pass
             
         try:
             QApplication.quit()
-        except Exception:
+        except Exception as e:
+            logger.error(f"Error borrando aplicación: {e}")
             pass
             
         os._exit(1)
@@ -100,7 +102,7 @@ def global_exception_handler(exc_type, exc_value, exc_traceback):
         sys.__excepthook__(exc_type, exc_value, exc_traceback)
         return
 
-    # Log with CRITICAL level and details
+    # Log with CRITICAL level and details (this help to catch any main thread exceptions)
     logger.critical("Uncaught main thread exception:", exc_info=(exc_type, exc_value, exc_traceback))
     
     try:
@@ -109,10 +111,10 @@ def global_exception_handler(exc_type, exc_value, exc_traceback):
         
         global exception_signaler
         if exception_signaler is not None:
-            # If signaler is active, emit to main thread thread-safely
+            # If signaler is active, emit to main thread thread-safely (when app crashes, it's important to show the dialog in the main thread)
             exception_signaler.exception_caught.emit(tb_text)
         else:
-            # Fallback if exception occurs before signaler is initialized
+            # Fallback if exception occurs before signaler is initialized (when app crashes before the main thread is initialized)
             print("Early crash (no UI exception signaler):", tb_text, file=sys.stderr)
             os._exit(1)
     except Exception:

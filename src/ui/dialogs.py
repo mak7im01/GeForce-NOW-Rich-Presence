@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QLabel, QLineEdit, QPushButton, 
                              QListWidget, QHBoxLayout, QMessageBox, QWidget)
-from PyQt5.QtGui import QIcon, QMovie
+from PyQt5.QtGui import QIcon
 from PyQt5.QtCore import Qt, QSize
 from src.core.utils import ASSETS_DIR
 from src.core.utils import get_lang_from_registry, load_locale
@@ -379,20 +379,6 @@ class AskGameDialog(QDialog):
 
         layout.addLayout(btn_layout)
         self.setLayout(layout)
-
-        # ---- 🎞️ ANIMATED BACKGROUND ----
-        self.bg_label = QLabel(self)
-        self.gif = QMovie(str(ASSETS_DIR / "gfn2.mp4"))
-        self.bg_label.setMovie(self.gif)
-        self.bg_label.setScaledContents(True)
-        self.gif.start()
-        
-        self.bg_label.lower()
-
-    def resizeEvent(self, event):
-        if hasattr(self, 'bg_label'):
-            self.bg_label.resize(self.size())
-        super().resizeEvent(event)
 
     def get_game_name(self):
         return self.entry.text()

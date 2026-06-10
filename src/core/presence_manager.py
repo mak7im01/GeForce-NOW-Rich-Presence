@@ -1476,17 +1476,23 @@ class PresenceManager(QObject):
                 self._ensure_discord_match(current_game["name"])
 
         if game_changed:
-            logger.info(f"🔍 DEBUG: Game Changed detected.")
-            logger.info(f"   OLD: {self.last_game}")
-            logger.info(f"   NEW: {current_game}")
+            transition = (self.last_game.copy() if isinstance(self.last_game, dict) else self.last_game,
+                          current_game.copy() if isinstance(current_game, dict) else current_game)
+            last_transition = getattr(self, "_last_handled_transition", (None, None))
             
-            logger.debug(f"🧹close_fake_executable desde update_presence (game_changed)")
-            self.close_fake_executable()
-            if current_game and current_game.get("executable_path"):
-                self.launch_fake_executable(current_game["executable_path"])
-            
-            if current_game:
-                self.current_game_start_time = int(time.time())
+            if not self.is_same_game(last_transition[0], transition[0]) or not self.is_same_game(last_transition[1], transition[1]):
+                self._last_handled_transition = transition
+                logger.info(f"🔍 DEBUG: Game Changed detected.")
+                logger.info(f"   OLD: {self.last_game}")
+                logger.info(f"   NEW: {current_game}")
+                
+                logger.debug(f"🧹close_fake_executable desde update_presence (game_changed)")
+                self.close_fake_executable()
+                if current_game and current_game.get("executable_path"):
+                    self.launch_fake_executable(current_game["executable_path"])
+                
+                if current_game:
+                    self.current_game_start_time = int(time.time())
 
         if not current_game:
             show_lobby = True
@@ -1651,7 +1657,8 @@ class PresenceManager(QObject):
             "small_image": current_game.get("icon_key") if current_game.get("icon_key") else None,
             "start": self.current_game_start_time,
             "buttons": [
-                {"label": self.texts.get("play_on_gfn", "Jugar en GeForce NOW"), "url": "https://geforcenow.digevo.com/"}
+                {"label": self.texts.get("play_on_gfn", "Jugar en GeForce NOW"), "url": "https://play.geforcenow.com/mall/"},
+                {"label": "GFN Rich Presence", "url": "https://github.com/KarmaDevz/GeForce-NOW-Rich-Presence"}
             ]
         }
         
