@@ -7,6 +7,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from PyQt5.QtWidgets import QApplication
+from PyQt5.QtGui import QFontDatabase
 
 from src.core.utils import (
     BASE_DIR, CONFIG_DIR, LOGS_DIR, LANG_DIR, ASSETS_DIR, LOG_FILE, ENV_PATH,
@@ -179,6 +180,24 @@ def main():
     # 4. Initialize PyQt Application
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False) # Important for tray apps
+
+    # Load custom font (ttf or otf)
+    font_path = None
+    for ext in ["ttf", "otf"]:
+        p = ASSETS_DIR / f"font.{ext}"
+        if p.exists():
+            font_path = str(p)
+            break
+
+    if font_path:
+        font_id = QFontDatabase.addApplicationFont(font_path)
+        if font_id != -1:
+            families = QFontDatabase.applicationFontFamilies(font_id)
+            logger.info(f"Loaded custom font families: {families}")
+        else:
+            logger.error(f"Failed to load custom font from {font_path}")
+    else:
+        logger.warning("Custom font file (font.ttf or font.otf) not found in assets")
 
     global exception_signaler
     exception_signaler = ExceptionSignaler()

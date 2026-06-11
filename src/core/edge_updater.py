@@ -13,7 +13,6 @@ try:
 except ImportError:
     winreg = None
 
-from PyQt5.QtWidgets import QMessageBox
 
 from src.core.utils import DRIVER_PATH, IS_WINDOWS
 
@@ -44,20 +43,19 @@ class EdgeDriverUpdater:
         logger.info("Starting Edge Driver Check...")
 
         # 1. Ask User Permission
-        reply = QMessageBox.question(
+        from src.ui.dialogs import GamingMessageBox
+        reply = GamingMessageBox.show_question(
             self.parent_widget,
             "Edge Driver Check",
             "This application needs to check your installed Microsoft Edge version to download the correct WebDriver.\n\n"
             "This requires reading the Registry (HKEY_CURRENT_USER).\n\n"
             "Do you allow this check?\n"
-            "(If No, we will try to download the latest available version, which might not match your browser.)",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.Yes
+            "(If No, we will try to download the latest available version, which might not match your browser.)"
         )
 
         version_to_download = None
 
-        if reply == QMessageBox.Yes:
+        if reply:
             logger.info("User allowed registry check.")
             version_to_download = self.get_edge_version_from_registry()
             if not version_to_download:
@@ -138,7 +136,8 @@ class EdgeDriverUpdater:
                 return self._download_and_extract(target_url)
             else:
                 logger.error("Failed to find download URL on official page.")
-                QMessageBox.warning(self.parent_widget, "Error", "Could not find the latest Edge Driver. Please download it manually.")
+                from src.ui.dialogs import GamingMessageBox
+                GamingMessageBox.show_warning(self.parent_widget, "Error", "Could not find the latest Edge Driver. Please download it manually.")
                 return False
 
         except Exception as e:
@@ -200,7 +199,8 @@ class EdgeDriverUpdater:
                             target_path.rename(old_path)
                         except Exception as e:
                             logger.error(f"Could not replace driver file (locked?): {e}")
-                            QMessageBox.critical(self.parent_widget, "Error", "Edge Driver is in use. Please close any open Edge/Driver instances and restart.")
+                            from src.ui.dialogs import GamingMessageBox
+                            GamingMessageBox.show_warning(self.parent_widget, "Error", "Edge Driver is in use. Please close any open Edge/Driver instances and restart.")
                             return False
 
                 shutil.move(str(driver_src), str(target_path))

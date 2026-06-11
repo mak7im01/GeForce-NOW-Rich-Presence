@@ -7,7 +7,7 @@ import tempfile
 import time
 from pathlib import Path
 from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QLabel, QPushButton, QProgressBar, QMessageBox, QHBoxLayout,
+    QDialog, QVBoxLayout, QLabel, QPushButton, QProgressBar, QHBoxLayout,
     QScrollArea
 )
 from PyQt5.QtCore import QThread, pyqtSignal, Qt, QObject
@@ -27,7 +27,7 @@ GAMING_STYLESHEET = """
 
     QLabel {
         font-size: 14px;
-        font-family: "Segoe UI";
+        font-family: "TT Octosquares Trl Cnd";
         color: #e0e0e0;
         padding-bottom: 4px;
     }
@@ -46,7 +46,7 @@ GAMING_STYLESHEET = """
         border-radius: 6px;
         background: #1a1b1d;
         color: #ffffff;
-        font-family: "Segoe UI";
+        font-family: "TT Octosquares Trl Cnd";
         font-weight: bold;
     }
 
@@ -60,7 +60,7 @@ GAMING_STYLESHEET = """
         padding: 8px 16px;
         border-radius: 6px;
         font-size: 14px;
-        font-family: "Segoe UI";
+        font-family: "TT Octosquares Trl Cnd";
         font-weight: bold;
     }
 
@@ -399,7 +399,8 @@ class UpdateDialog(QDialog):
                 else:
                     msg = f"Modo de desarrollo: Actualización descargada en {installer_path}.\nLa auto-actualización silenciosa solo funciona en la versión compilada."
                     logger.info(msg)
-                    QMessageBox.information(self, "Desarrollo", msg)
+                    from src.ui.dialogs import GamingMessageBox
+                    GamingMessageBox.show_info(self, "Desarrollo", msg)
                     self.accept()
             else:
                 # Launch installer wizard (.exe) on Windows if not a zip and exit
@@ -409,7 +410,8 @@ class UpdateDialog(QDialog):
             self.on_error(f"Failed to launch installer: {e}")
 
     def on_error(self, msg):
-        QMessageBox.critical(self, "Error", msg)
+        from src.ui.dialogs import GamingMessageBox
+        GamingMessageBox.show_warning(self, "Error", msg)
         self.btn_update.setEnabled(True)
         self.btn_cancel.setEnabled(True)
         self.progress_bar.setVisible(False)
@@ -466,14 +468,16 @@ class Updater(QObject):
                 self.update_notes = ""
                 self.update_status_changed.emit()
                 if not silent:
-                    QMessageBox.information(self.parent_widget, t.get("no_updates", "No Updates"), t.get("latest_version_msg", "You are using the latest version."))
+                    from src.ui.dialogs import GamingMessageBox
+                    GamingMessageBox.show_info(self.parent_widget, t.get("no_updates", "No Updates"), t.get("latest_version_msg", "You are using the latest version."))
         finally:
             self.checking_updates = False
 
     def on_check_error(self, msg, silent):
         try:
             if not silent:
-                QMessageBox.critical(self.parent_widget, "Error", f"Error al comprobar actualizaciones: {msg}")
+                from src.ui.dialogs import GamingMessageBox
+                GamingMessageBox.show_warning(self.parent_widget, "Error", f"Error al comprobar actualizaciones: {msg}")
         finally:
             self.checking_updates = False
 

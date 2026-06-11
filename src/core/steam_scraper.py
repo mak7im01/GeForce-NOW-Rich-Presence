@@ -90,6 +90,8 @@ class SteamScraper:
             
             return rich_presence_text, group_size
             
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+            raise e
         except Exception as e:
             logger.error(f"⚠️ Error scraping Steam: {e}")
             return None, None

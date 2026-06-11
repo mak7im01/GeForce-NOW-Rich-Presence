@@ -26,7 +26,11 @@
         "executable_path": "borderlands3.exe",
         "cmsId": "102756711",
         "uuid": "d524e928-f7c3-4fc8-90a0-ece05a1243f4",
-        "appStore": "steam"
+        "appStore": "steam",
+        "custom_details": "En Partida",
+        "custom_state": "Jugando Solo",
+        "custom_party_size_current": 1,
+        "custom_party_size_max": 4
     },
     "Skyrim": {
         "name": "The Elder Scrolls V: Skyrim",
@@ -65,7 +69,11 @@
         "name": "En la Biblioteca de Geforce Now",
         "image": "lib",
         "icon_key": "steam",
-        "state_text": "Buscando qué jugar"
+        "state_text": "Buscando qué jugar",
+        "custom_details": "En el menú principal",
+        "custom_state": "Buscando juego",
+        "custom_party_size_current": 0,
+        "custom_party_size_max": 0
     },
     "SpeedRunners": {
         "name": "SpeedRunners",

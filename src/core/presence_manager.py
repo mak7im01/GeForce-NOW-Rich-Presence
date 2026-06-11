@@ -49,6 +49,7 @@ class PresenceManager(QObject):
     sync_finished = pyqtSignal(int, int) # updated_count, total_processed
     sync_error = pyqtSignal(str)
     gfn_error_detected = pyqtSignal()
+    presence_updated = pyqtSignal(str, str, bool, bool)
     
     def __init__(self, client_id: str, games_map: dict, cookie_manager: CookieManager, test_rich_url: str, texts: Dict,
                  config_manager=None, update_interval: int = 10, keep_alive: bool = False):
@@ -104,6 +105,10 @@ class PresenceManager(QObject):
         # Cache for normalized apps list
         self._cached_apps_normalized = None
         self._last_apps_ts = 0
+
+        # Connection status tracking
+        self.is_online = True
+        self._offline_ticks = 0
 
     def cleanup_all_fake_processes(self):
         """
@@ -1187,9 +1192,30 @@ class PresenceManager(QObject):
         else:
              logger.info(f"ℹ️ Usuario ignoró match Discord para '{game_key}'")
 
+    def check_internet_connection(self) -> bool:
+        import socket
+        try:
+            # Try to connect to a reliable public host (e.g. Cloudflare DNS at 1.1.1.1) on port 53
+            socket.setdefaulttimeout(1.5)
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.connect(("1.1.1.1", 53))
+            s.close()
+            return True
+        except Exception:
+            return False
+
     def check_presence(self):
         try:
             self.check_quests() # Check optional quests
+            
+            # Check if connection has returned when offline
+            if not getattr(self, "is_online", True):
+                self._offline_ticks = getattr(self, "_offline_ticks", 0) + 1
+                if self._offline_ticks >= 3:
+                    self._offline_ticks = 0
+                    if self.check_internet_connection():
+                        self.is_online = True
+                        logger.info("🌐 Conexión a internet restaurada. Reanudando scraping de Steam.")
             
             game = self.find_active_game()
             self.update_presence(game)
@@ -1456,18 +1482,50 @@ class PresenceManager(QObject):
                 except Exception:
                     pass
                 self.last_game = None
+                self.emit_presence_status()
                 return
 
+        # Resolve lobby status before checking game changes
         current_game = game_info or None
+        if not current_game:
+            show_lobby = True
+            if self.config_manager:
+                show_lobby = self.config_manager.get_setting("show_lobby_status", True)
+            
+            if self.is_geforce_running() and show_lobby:
+                current_game = {
+                    "name": "GeForce NOW",
+                    "client_id": "1095416975028650046",
+                    "image": "geforce",
+                    "custom_details": self.texts.get("lobby_status", "En el menú principal")
+                }
+
+        # Check if game has actually changed using the resolved game dicts
         game_changed = not self.is_same_game(self.last_game, current_game)
         
         status, group_size = None, None
         if current_game and current_game.get("steam_appid"):
-            status, group_size = self.scraper.get_rich_presence()
+            # Check online status before invoking scraper to handle offline state gracefully
+            if getattr(self, "is_online", True):
+                import requests
+                try:
+                    status, group_size = self.scraper.get_rich_presence()
+                except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+                    logger.warning(f"🔌 Conexión a internet perdida al consultar Steam. Entrando en modo offline: {e}")
+                    self.is_online = False
+                    self._offline_ticks = 0
+                except Exception as e:
+                    logger.debug(f"Error scraping rich presence: {e}")
+            else:
+                logger.debug("Scraping omitido: Modo offline activo.")
         
         if current_game and current_game.get("name") in self.games_map:
             defaults = self.games_map[current_game["name"]]
             merged = {**defaults, **current_game}
+            # Protect custom presence keys from being overwritten by defaults
+            for k in ("custom_details", "custom_state", "custom_party_size_current", "custom_party_size_max"):
+                if k in defaults:
+                    merged[k] = defaults[k]
             current_game = merged
 
         # Check if missing client_id and ensure match
@@ -1494,27 +1552,17 @@ class PresenceManager(QObject):
                 if current_game:
                     self.current_game_start_time = int(time.time())
 
+        # If current_game is still None, GFN is not running or show_lobby_status is disabled
         if not current_game:
-            show_lobby = True
-            if self.config_manager:
-                show_lobby = self.config_manager.get_setting("show_lobby_status", True)
-            
-            if self.is_geforce_running() and show_lobby:
-                current_game = {
-                    "name": "GeForce NOW",
-                    "client_id": "1095416975028650046",
-                    "image": "geforce",
-                    "custom_details": self.texts.get("lobby_status", "En el menú principal")
-                }
-            else:
-                if self.last_game is not None:
-                    try:
-                        if self.rpc: self.rpc.clear()
-                    except Exception:
-                        pass
-                    self.last_game = None
-                    self.current_game_start_time = None
-                return
+            if self.last_game is not None:
+                try:
+                    if self.rpc: self.rpc.clear()
+                except Exception:
+                    pass
+                self.last_game = None
+                self.current_game_start_time = None
+            self.emit_presence_status()
+            return
 
         client_id = current_game.get("client_id") or self.client_id
         
@@ -1647,6 +1695,7 @@ class PresenceManager(QObject):
             except:
                 pass
             self.last_game = None
+            self.emit_presence_status()
             return
 
         presence_data = {
@@ -1654,7 +1703,7 @@ class PresenceManager(QObject):
             "state": state,
             "large_image": current_game.get('image', 'steam'),
             "large_text": current_game.get('name'),
-            "small_image": current_game.get("icon_key") if current_game.get("icon_key") else None,
+            "small_image": None,
             "start": self.current_game_start_time,
             "buttons": [
                 {"label": self.texts.get("play_on_gfn", "Jugar en GeForce NOW"), "url": "https://play.geforcenow.com/mall/"},
@@ -1687,6 +1736,8 @@ class PresenceManager(QObject):
                 del self._last_forced_game
             if hasattr(self, "_force_stop_time"):
                 del self._force_stop_time
+        
+        self.emit_presence_status()
 
     def is_same_game(self, g1: Optional[dict], g2: Optional[dict]) -> bool:
         if g1 is None and g2 is None:
@@ -1737,6 +1788,30 @@ class PresenceManager(QObject):
         self.update_presence(game) # Pasa el objeto
         return True
 
+    def emit_presence_status(self):
+        forced = getattr(self, "forced_game", None)
+        active = self.last_game
+        
+        if forced:
+            state = "forced"
+            gname = forced.get('name', 'Unknown')
+            text = self.texts.get("status_forced", "Forced: {game}").replace("{game}", gname)
+        elif active and self.rpc and getattr(self, "_connected_client_id", None):
+            state = "active"
+            gname = active.get('name', 'Unknown')
+            if gname == "GeForce NOW":
+                text = self.texts.get("status_searching", "Buscando juego...")
+            else:
+                text = self.texts.get("status_active", "Active: {game}").replace("{game}", gname)
+        else:
+            state = "disconnected"
+            text = self.texts.get("status_disconnected", "Disconnected")
+            
+        discord_connected = self.rpc is not None and getattr(self, "_connected_client_id", None) is not None
+        gfn_running = self.is_geforce_running()
+        
+        self.presence_updated.emit(state, text, discord_connected, gfn_running)
+
     def close(self):
         if self.rpc:
             try:
@@ -1749,3 +1824,5 @@ class PresenceManager(QObject):
                 logger.info("🔴 Discord RPC cerrado correctamente.")
             except Exception:
                 pass
+        self.last_game = None
+        self.emit_presence_status()

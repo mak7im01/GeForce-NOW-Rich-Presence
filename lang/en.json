@@ -5,7 +5,7 @@
     "close_window": "Close Window (Games will continue)",
     "force_new_game": "Force New Game",
     "about": "About",
-    "about_desc": "This program was made by KarmaDevz, consider support the program",
+    "about_desc": "This program was made by KarmaDevz, it was made for the community to enjoy their games in a better way on Discord. Please consider supporting my work by giving a star on the GitHub repository, donations will be well received :D.",
     "launching": "🚀 Launching GeForce NOW...",
     "launching_discord": "🚀 Launching Discord...",
     "tray_forced_game": "Forced game",
@@ -134,5 +134,17 @@
     "copied": "Copied!",
     "config_show_lobby": "Show GeForce NOW when no game is active",
     "lobby_status": "In the main menu",
-    "play_on_gfn": "Play on GeForce NOW"
+    "play_on_gfn": "Play on GeForce NOW",
+    "status_disconnected": "Disconnected",
+    "status_active": "Active: {game}",
+    "status_forced": "Forced: {game}",
+    "status_searching": "Searching for game...",
+    "tray_sec_quick_action": "Quick Action",
+    "tray_sec_custom_presence": "Custom Presence",
+    "tray_sec_tools": "Tools",
+    "tray_tools_logs": "View logs",
+    "tray_tools_integrity": "Verify integrity",
+    "tray_about": "About",
+    "tray_discord_invite_gfn": "Join the GeForce NOW Server",
+    "tray_open_gfn": "Open GeForce NOW"
 }

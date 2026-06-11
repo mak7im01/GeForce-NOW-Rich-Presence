@@ -8,7 +8,7 @@
     "launching_discord": "🚀 Iniciando Discord...",
     "tray_forced_game": "Juego forzado",
     "about": "Acerca de",
-    "about_desc": "Este programa fue hecho por KarmaDevz, considera apoyar el programa",
+    "about_desc": "Este programa fue hecho por KarmaDevz, está hecho para que la comunidad pueda disfrutar sus juegos de una mejor manera en Discord. Por favor considera apoyar mi trabajo dando una estrella en el repositorio de GitHub, las donaciones serán bien recibidas :D.",
     "selection_required": "Selección requerida",
     "playing_solo": "Jugando solo",
     "playing_in_group": "Jugando en grupo",
@@ -134,5 +134,17 @@
     "copied": "¡Copiado!",
     "config_show_lobby": "Mostrar GeForce NOW cuando no hay juego activo",
     "lobby_status": "En el menú principal",
-    "play_on_gfn": "Jugar en GeForce NOW"
+    "play_on_gfn": "Jugar en GeForce NOW",
+    "status_disconnected": "Desconectado",
+    "status_active": "Activo: {game}",
+    "status_forced": "Forzado: {game}",
+    "status_searching": "Buscando juego...",
+    "tray_sec_quick_action": "Acción Rápida",
+    "tray_sec_custom_presence": "Presencia Personalizada",
+    "tray_sec_tools": "Herramientas",
+    "tray_tools_logs": "Ver logs",
+    "tray_tools_integrity": "Verificar integridad",
+    "tray_about": "Acerca de",
+    "tray_discord_invite_gfn": "Entra al servidor de GeForce NOW",
+    "tray_open_gfn": "Abrir GeForce NOW"
 }
